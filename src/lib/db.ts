@@ -21,7 +21,7 @@ export function getDb(): Database.Database {
     if (!fs.existsSync(DB_PATH)) {
       const home = os.homedir();
       const oldPaths = [
-        // Old Electron userData paths (app.getPath('userData'))
+        // Old desktop app userData paths
         path.join(home, 'Library', 'Application Support', 'CodePilot', 'codepilot.db'),
         path.join(home, 'Library', 'Application Support', 'codepilot', 'codepilot.db'),
         path.join(home, 'Library', 'Application Support', 'Claude GUI', 'codepilot.db'),

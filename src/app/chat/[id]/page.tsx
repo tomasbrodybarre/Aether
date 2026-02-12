@@ -109,7 +109,6 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
       {sessionTitle && (
         <div
           className="flex items-center justify-center px-4 py-2"
-          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
         >
           <h2 className="text-sm font-medium text-foreground/80 truncate max-w-md">
             {sessionTitle}

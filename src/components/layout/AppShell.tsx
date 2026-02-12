@@ -249,11 +249,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <ResizeHandle side="left" onResize={handleChatListResize} onResizeEnd={handleChatListResizeEnd} />
             )}
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-              {/* Electron draggable title bar region */}
-              <div
-                className="h-11 w-full shrink-0"
-                style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-              />
+              <div className="h-11 w-full shrink-0" />
               <main className="relative flex-1 overflow-hidden">{children}</main>
             </div>
             {isChatDetailRoute && previewFile && (

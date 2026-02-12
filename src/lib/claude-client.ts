@@ -175,14 +175,14 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
     async start(controller) {
       try {
         // Build env for the Claude Code subprocess.
-        // Start with process.env (includes user shell env from Electron's loadUserShellEnv).
+        // Start with process.env.
         // Then overlay any API config the user set in CodePilot settings (optional).
         const sdkEnv: Record<string, string> = { ...process.env as Record<string, string> };
 
         // Ensure HOME/USERPROFILE are set so Claude Code can find ~/.claude/commands/
         if (!sdkEnv.HOME) sdkEnv.HOME = os.homedir();
         if (!sdkEnv.USERPROFILE) sdkEnv.USERPROFILE = os.homedir();
-        // Ensure SDK subprocess has expanded PATH (consistent with Electron mode)
+        // Ensure SDK subprocess has expanded PATH
         sdkEnv.PATH = getExpandedPath();
 
         // On Windows, auto-detect Git Bash if not already configured
