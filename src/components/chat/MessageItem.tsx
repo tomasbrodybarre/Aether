@@ -14,6 +14,7 @@ import { InlineFigures } from './InlineFigures';
 
 interface MessageItemProps {
   message: Message;
+  blockNumber?: number;
 }
 
 interface ToolBlock {
@@ -204,7 +205,7 @@ function TokenUsageDisplay({ usage }: { usage: TokenUsage }) {
 
 const COLLAPSE_HEIGHT = 300;
 
-export function MessageItem({ message }: MessageItemProps) {
+export function MessageItem({ message, blockNumber }: MessageItemProps) {
   const isUser = message.role === 'user';
   const { text, tools } = parseToolBlocks(message.content);
   const pairedTools = pairTools(tools);
@@ -244,6 +245,15 @@ export function MessageItem({ message }: MessageItemProps) {
   return (
     <AIMessage from={isUser ? 'user' : 'assistant'}>
       <MessageContent>
+        {/* Block label for assistant messages */}
+        {!isUser && blockNumber !== undefined && (
+          <div className="flex items-center gap-1.5 mb-1 select-none">
+            <span className="text-[10px] font-mono text-muted-foreground/40 bg-muted/30 px-1.5 py-0.5 rounded">
+              Out[{blockNumber}]
+            </span>
+          </div>
+        )}
+
         {/* File attachments for user messages */}
         {isUser && files.length > 0 && (
           <FileAttachmentDisplay files={files} />
@@ -292,12 +302,12 @@ export function MessageItem({ message }: MessageItemProps) {
                   {isExpanded ? (
                     <>
                       <ChevronUpIcon className="h-3 w-3" />
-                      <span>收起</span>
+                      <span>Show less</span>
                     </>
                   ) : (
                     <>
                       <ChevronDownIcon className="h-3 w-3" />
-                      <span>展开</span>
+                      <span>Show more</span>
                     </>
                   )}
                 </button>

@@ -65,9 +65,15 @@ export function MessageList({
   return (
     <Conversation>
       <ConversationContent className="mx-auto max-w-3xl px-4 py-6 gap-6">
-        {messages.map((message) => (
-          <MessageItem key={message.id} message={message} />
-        ))}
+        {messages.map((message, index) => {
+          // Compute block number for assistant messages (1-indexed, like Jupyter Out[N])
+          const blockNumber = message.role === 'assistant'
+            ? messages.slice(0, index + 1).filter(m => m.role === 'assistant').length
+            : undefined;
+          return (
+            <MessageItem key={message.id} message={message} blockNumber={blockNumber} />
+          );
+        })}
 
         {isStreaming && (
           <StreamingMessage
