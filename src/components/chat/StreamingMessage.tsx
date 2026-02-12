@@ -17,6 +17,7 @@ import {
   ConfirmationAction,
 } from '@/components/ai-elements/confirmation';
 import { Shimmer } from '@/components/ai-elements/shimmer';
+import { InlineFigures } from './InlineFigures';
 import type { ToolUIPart } from 'ai';
 import type { PermissionRequestEvent } from '@/types';
 
@@ -183,6 +184,17 @@ export function StreamingMessage({
             streamingToolOutput={streamingToolOutput}
           />
         )}
+
+        {/* Inline figures from bash tool results — visible even when tools are collapsed */}
+        <InlineFigures tools={toolUses.map((tool) => {
+          const result = toolResults.find((r) => r.tool_use_id === tool.id);
+          return {
+            name: tool.name,
+            input: tool.input,
+            result: result?.content,
+            isError: result?.is_error,
+          };
+        })} />
 
         {/* Permission approval confirmation */}
         {(pendingPermission || permissionResolved) && (

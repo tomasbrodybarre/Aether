@@ -179,6 +179,13 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
         // Then overlay any API config the user set in CodePilot settings (optional).
         const sdkEnv: Record<string, string> = { ...process.env as Record<string, string> };
 
+        // Force matplotlib to use non-interactive backend so figures save to files
+        // instead of opening GUI windows. Our InlineFigures component picks up the
+        // saved image paths from bash output and renders them inline.
+        if (!sdkEnv.MPLBACKEND) {
+          sdkEnv.MPLBACKEND = 'Agg';
+        }
+
         // Ensure HOME/USERPROFILE are set so Claude Code can find ~/.claude/commands/
         if (!sdkEnv.HOME) sdkEnv.HOME = os.homedir();
         if (!sdkEnv.USERPROFILE) sdkEnv.USERPROFILE = os.homedir();
@@ -273,15 +280,29 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           queryOptions.model = model;
         }
 
-        if (systemPrompt) {
-          // Use preset append mode to keep Claude Code's default system prompt
-          // (which includes skills, working directory awareness, etc.)
-          queryOptions.systemPrompt = {
-            type: 'preset',
-            preset: 'claude_code',
-            append: systemPrompt,
-          };
-        }
+        // Always append scientific-workflow guidance for inline figure rendering.
+        // MPLBACKEND=Agg (set above) prevents GUI windows, but Claude also needs to
+        // save figures to files so our InlineFigures component can detect and render them.
+        // Key: Claude must print the absolute path so InlineFigures can extract it from
+        // the bash tool output and the file-serving API can resolve it.
+        const scienceLabPreamble = [
+          'When writing Python code that produces plots or figures:',
+          '- Save figures with plt.savefig() using ABSOLUTE paths (e.g. plt.savefig(os.path.join(os.getcwd(), "figure.png"), dpi=150, bbox_inches="tight"))',
+          '- After saving, ALWAYS print the absolute path: print(os.path.abspath("figure.png"))',
+          '- Do NOT call plt.show() — this environment renders saved figures inline automatically',
+          '- Use descriptive filenames (e.g. "correlation_matrix.png", "time_series.png")',
+          '- Always import os at the top of scripts that save figures',
+        ].join('\n');
+
+        const fullAppend = systemPrompt
+          ? `${scienceLabPreamble}\n\n${systemPrompt}`
+          : scienceLabPreamble;
+
+        queryOptions.systemPrompt = {
+          type: 'preset',
+          preset: 'claude_code',
+          append: fullAppend,
+        };
 
         if (mcpServers && Object.keys(mcpServers).length > 0) {
           queryOptions.mcpServers = toSdkMcpConfig(mcpServers);

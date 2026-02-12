@@ -81,11 +81,14 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 /**
- * Serve raw file content from the user's home directory.
- * Security: only allows reading files within the user's home directory.
+ * Serve raw file content.
+ * Security: allows reading files within the user's home directory OR
+ * the session's working directory (passed via ?cwd= for relative paths).
+ * This is a local-only app, so the security boundary is reasonable.
  */
 export async function GET(request: NextRequest) {
   const filePath = request.nextUrl.searchParams.get('path');
+  const cwd = request.nextUrl.searchParams.get('cwd');
 
   if (!filePath) {
     return new Response(JSON.stringify({ error: 'path parameter is required' }), {
@@ -94,10 +97,20 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const homeDir = os.homedir();
-  const resolved = path.resolve(filePath);
+  // Resolve the path: if relative and cwd is provided, resolve against cwd
+  const resolved = path.isAbsolute(filePath)
+    ? path.resolve(filePath)
+    : cwd
+      ? path.resolve(cwd, filePath)
+      : path.resolve(filePath);
 
-  if (!isPathSafe(homeDir, resolved)) {
+  // Security: allow files under the home directory or the working directory
+  const homeDir = os.homedir();
+  const allowedBases = [homeDir];
+  if (cwd) allowedBases.push(path.resolve(cwd));
+
+  const isAllowed = allowedBases.some(base => isPathSafe(base, resolved));
+  if (!isAllowed) {
     return new Response(JSON.stringify({ error: 'Access denied' }), {
       status: 403,
       headers: { 'Content-Type': 'application/json' },

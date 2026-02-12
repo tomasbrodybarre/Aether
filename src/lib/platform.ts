@@ -96,8 +96,29 @@ export function getExpandedPath(): string {
 }
 
 /**
+ * On Windows, npm installs global packages as .cmd wrappers that cannot be
+ * spawned by child_process.spawn without shell:true. The Claude Agent SDK
+ * does not set shell:true, so spawning claude.cmd fails with EINVAL.
+ *
+ * However, the SDK checks if the path ends in .js/.mjs — if so, it runs
+ * `node <path>` instead of spawning directly. So we resolve .cmd wrappers
+ * to the underlying cli.js entry point.
+ */
+function resolveCliEntryPoint(cmdPath: string): string | undefined {
+  if (!isWindows || !/\.(cmd|bat)$/i.test(cmdPath)) return undefined;
+  // The .cmd is in e.g. <npm_prefix>/claude.cmd
+  // The cli.js is at <npm_prefix>/node_modules/@anthropic-ai/claude-code/cli.js
+  const dir = path.dirname(cmdPath);
+  const cliJs = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+  if (fs.existsSync(cliJs)) return cliJs;
+  return undefined;
+}
+
+/**
  * Find and validate the Claude CLI binary.
  * Tests each candidate with --version before returning.
+ * On Windows, resolves .cmd wrappers to the underlying cli.js so the SDK
+ * can spawn via `node cli.js` instead of failing on .cmd execution.
  */
 export function findClaudeBinary(): string | undefined {
   // Try known candidate paths first
@@ -108,7 +129,8 @@ export function findClaudeBinary(): string | undefined {
         stdio: 'pipe',
         shell: needsShell(p),
       });
-      return p;
+      // On Windows, resolve .cmd to cli.js for SDK compatibility
+      return resolveCliEntryPoint(p) || p;
     } catch {
       // not found, try next
     }
@@ -135,7 +157,8 @@ export function findClaudeBinary(): string | undefined {
           stdio: 'pipe',
           shell: needsShell(candidate),
         });
-        return candidate;
+        // On Windows, resolve .cmd to cli.js for SDK compatibility
+        return resolveCliEntryPoint(candidate) || candidate;
       } catch {
         continue;
       }

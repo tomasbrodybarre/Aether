@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { usePanel } from "@/hooks/usePanel";
-import { ConnectionStatus } from "./ConnectionStatus";
+
 import { ImportSessionDialog } from "./ImportSessionDialog";
 import type { ChatSession } from "@/types";
 
@@ -157,7 +157,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
         <span className="text-[13px] font-semibold tracking-tight text-sidebar-foreground">
           Chats
         </span>
-        <ConnectionStatus />
+        {/* Connection status indicator removed — unnecessary for CLI-wrapped architecture */}
       </div>
 
       {/* Search */}
