@@ -10,6 +10,7 @@ import {
 import { ToolActionsGroup } from '@/components/ai-elements/tool-actions-group';
 import { CopyIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon } from 'lucide-react';
 import { FileAttachmentDisplay } from './FileAttachmentDisplay';
+import { InlineFigures } from './InlineFigures';
 
 interface MessageItemProps {
   message: Message;
@@ -260,6 +261,9 @@ export function MessageItem({ message }: MessageItemProps) {
             }))}
           />
         )}
+
+        {/* Inline figures from bash tool results — visible even when tools are collapsed */}
+        {!isUser && <InlineFigures tools={pairedTools} />}
 
         {/* Text content */}
         {displayText && (

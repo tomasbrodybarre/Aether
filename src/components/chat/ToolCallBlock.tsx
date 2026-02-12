@@ -17,6 +17,8 @@ import {
 } from "@hugeicons/core-free-icons";
 import { cn } from '@/lib/utils';
 import { CodeBlock } from './CodeBlock';
+import { ImageThumbnail } from './ImageThumbnail';
+import { ImageLightbox } from './ImageLightbox';
 
 type ToolStatus = 'running' | 'success' | 'error';
 
@@ -142,6 +144,67 @@ function renderDiff(input: unknown): React.ReactNode | null {
   );
 }
 
+const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|svg|webp|bmp|tiff)$/i;
+
+/**
+ * Extract image file paths from bash command input and output text.
+ * Looks for absolute/relative paths ending in image extensions.
+ */
+function extractImagePaths(command: string, output: string): string[] {
+  const combined = command + '\n' + output;
+  const paths: string[] = [];
+  // Match file paths: absolute (Unix or Windows) or relative, ending in image extension
+  // Captures paths that may be quoted or unquoted
+  const pathPattern = /(?:['"]?)([A-Za-z]:\\[^\s'"<>|*?]+\.(png|jpg|jpeg|gif|svg|webp|bmp|tiff)|(?:\/|\.\/|\.\.\/)[^\s'"<>|*?]+\.(png|jpg|jpeg|gif|svg|webp|bmp|tiff))(?:['"]?)/gi;
+  let match;
+  while ((match = pathPattern.exec(combined)) !== null) {
+    const p = match[1];
+    if (p && !paths.includes(p)) {
+      paths.push(p);
+    }
+  }
+  return paths;
+}
+
+function DetectedFigures({ paths }: { paths: string[] }) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  if (paths.length === 0) return null;
+
+  const images = paths.map((p, i) => ({
+    src: `/api/files/raw?path=${encodeURIComponent(p)}`,
+    alt: p.split(/[/\\]/).pop() || `Figure ${i + 1}`,
+  }));
+
+  return (
+    <div className="mt-2">
+      <div className="text-xs text-muted-foreground mb-1">Generated figures</div>
+      <div className={cn(
+        "grid gap-2",
+        images.length === 1 && "grid-cols-1",
+        images.length === 2 && "grid-cols-2",
+        images.length >= 3 && "grid-cols-3",
+      )}>
+        {images.map((img, i) => (
+          <ImageThumbnail
+            key={img.src}
+            src={img.src}
+            alt={img.alt}
+            onClick={() => { setLightboxIndex(i); setLightboxOpen(true); }}
+          />
+        ))}
+      </div>
+      <ImageLightbox
+        images={images}
+        initialIndex={lightboxIndex}
+        open={lightboxOpen}
+        onOpenChange={setLightboxOpen}
+      />
+    </div>
+  );
+}
+
 export function ToolCallBlock({
   name,
   input,
@@ -209,6 +272,7 @@ export function ToolCallBlock({
       case 'bash': {
         const inp = input as Record<string, unknown> | undefined;
         const command = (inp?.command || inp?.cmd || '') as string;
+        const imagePaths = result ? extractImagePaths(command, result) : [];
         return (
           <div className="space-y-2">
             {command && (
@@ -221,6 +285,9 @@ export function ToolCallBlock({
               <div className="rounded-md bg-zinc-950 p-3 font-mono text-xs text-zinc-300 max-h-60 overflow-auto whitespace-pre-wrap break-all">
                 {result.slice(0, 5000)}
               </div>
+            )}
+            {imagePaths.length > 0 && (
+              <DetectedFigures paths={imagePaths} />
             )}
             {!result && status === 'running' && (
               <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">

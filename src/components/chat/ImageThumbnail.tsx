@@ -1,12 +1,15 @@
 'use client';
 
+import { cn } from '@/lib/utils';
+
 interface ImageThumbnailProps {
   src: string;
   alt: string;
   onClick: () => void;
+  maxHeight?: string;
 }
 
-export function ImageThumbnail({ src, alt, onClick }: ImageThumbnailProps) {
+export function ImageThumbnail({ src, alt, onClick, maxHeight = 'max-h-32' }: ImageThumbnailProps) {
   return (
     <button
       type="button"
@@ -17,7 +20,7 @@ export function ImageThumbnail({ src, alt, onClick }: ImageThumbnailProps) {
       <img
         src={src}
         alt={alt}
-        className="max-h-32 w-full object-cover rounded-lg"
+        className={cn(maxHeight, "w-full object-contain rounded-lg")}
       />
     </button>
   );
