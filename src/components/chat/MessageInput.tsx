@@ -312,7 +312,7 @@ function FileAttachmentsCapsules() {
                 className="h-5 w-5 rounded object-cover"
               />
             )}
-            <span className="max-w-[120px] truncate text-[11px]">
+            <span className="max-w-[120px] truncate text-[0.6875rem]">
               {file.filename || 'file'}
             </span>
             <button
@@ -887,7 +887,7 @@ export function MessageInput({
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 pl-2.5 pr-1.5 py-1 text-xs font-medium border border-blue-500/20">
                   <span className="font-mono">{badge.command}</span>
                   {badge.description && (
-                    <span className="text-blue-500/60 dark:text-blue-400/60 text-[10px]">{badge.description}</span>
+                    <span className="text-blue-500/60 dark:text-blue-400/60 text-[0.625rem]">{badge.description}</span>
                   )}
                   <button
                     type="button"
@@ -959,7 +959,7 @@ export function MessageInput({
                               <HugeiconsIcon icon={opt.icon} className="h-4 w-4 shrink-0" />
                               <div className="flex flex-col min-w-0">
                                 <span className="font-medium text-xs">{opt.label}</span>
-                                <span className="text-[10px] text-muted-foreground truncate">
+                                <span className="text-[0.625rem] text-muted-foreground truncate">
                                   {opt.description}
                                 </span>
                               </div>

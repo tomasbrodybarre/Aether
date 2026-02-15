@@ -116,11 +116,11 @@ export function TaskCard({ task, onUpdate, onDelete }: TaskCardProps) {
           </p>
         )}
         {task.description && (
-          <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+          <p className="mt-0.5 truncate text-[0.625rem] text-muted-foreground">
             {task.description}
           </p>
         )}
-        <p className="mt-0.5 text-[10px] text-muted-foreground">
+        <p className="mt-0.5 text-[0.625rem] text-muted-foreground">
           {formatTime(task.updated_at)}
         </p>
       </div>

@@ -84,10 +84,10 @@ export function FilePreview({ filePath, onBack }: FilePreviewProps) {
       {/* File info */}
       {preview && (
         <div className="flex items-center gap-2 pb-2">
-          <Badge variant="secondary" className="text-[10px]">
+          <Badge variant="secondary" className="text-[0.625rem]">
             {preview.language}
           </Badge>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[0.625rem] text-muted-foreground">
             {preview.line_count} lines
           </span>
         </div>

@@ -154,7 +154,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
     <aside className="hidden h-full shrink-0 flex-col overflow-hidden bg-sidebar lg:flex" style={{ width: width ?? 240 }}>
       {/* Header - extra top padding for macOS traffic lights */}
       <div className="flex h-12 shrink-0 items-center justify-between px-3 mt-5 pl-6">
-        <span className="text-[13px] font-semibold tracking-tight text-sidebar-foreground">
+        <span className="text-[0.8125rem] font-semibold tracking-tight text-sidebar-foreground">
           Chats
         </span>
         {/* Connection status indicator removed — unnecessary for CLI-wrapped architecture */}
@@ -197,7 +197,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
       <ScrollArea className="flex-1 min-h-0 px-3">
         <div className="flex flex-col pb-3">
           {filteredSessions.length === 0 ? (
-            <p className="px-2.5 py-3 text-[11px] text-muted-foreground/60">
+            <p className="px-2.5 py-3 text-[0.6875rem] text-muted-foreground/60">
               {searchQuery ? "No matching chats" : "No conversations yet"}
             </p>
           ) : (
@@ -206,7 +206,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
               if (!groupSessions || groupSessions.length === 0) return null;
               return (
                 <div key={group} className="mt-2 first:mt-0">
-                  <span className="px-2.5 py-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                  <span className="px-2.5 py-1 text-[0.6875rem] font-medium uppercase tracking-wider text-muted-foreground/60">
                     {group}
                   </span>
                   <div className="mt-1 flex flex-col gap-1">
@@ -242,7 +242,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
                                   <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                                 </span>
                               )}
-                              <span className="line-clamp-2 text-[13px] font-medium leading-tight break-all">
+                              <span className="line-clamp-2 text-[0.8125rem] font-medium leading-tight break-all">
                                 {session.title}
                               </span>
                               {/* Approval reminder */}
@@ -254,20 +254,20 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
                             </div>
                             <div className="flex items-center gap-1.5 min-w-0">
                               {/* Mode badge */}
-                              <span className={cn("text-[9px] px-1 py-0.5 rounded font-medium leading-none shrink-0", badgeCfg.className)}>
+                              <span className={cn("text-[0.5625rem] px-1 py-0.5 rounded font-medium leading-none shrink-0", badgeCfg.className)}>
                                 {badgeCfg.label}
                               </span>
                               {session.project_name && (
-                                <span className="truncate text-[10px] text-muted-foreground/50">
+                                <span className="truncate text-[0.625rem] text-muted-foreground/50">
                                   {session.project_name}
                                 </span>
                               )}
                               {session.project_name && (
-                                <span className="text-muted-foreground/30 text-[10px]">
+                                <span className="text-muted-foreground/30 text-[0.625rem]">
                                   ·
                                 </span>
                               )}
-                              <span className="text-[10px] text-muted-foreground/40 shrink-0">
+                              <span className="text-[0.625rem] text-muted-foreground/40 shrink-0">
                                 {formatRelativeTime(session.updated_at)}
                               </span>
                             </div>
@@ -308,7 +308,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
 
       {/* Version */}
       <div className="shrink-0 px-3 py-2 text-center">
-        <span className="text-[10px] text-muted-foreground/40">
+        <span className="text-[0.625rem] text-muted-foreground/40">
           v{process.env.NEXT_PUBLIC_APP_VERSION}
         </span>
       </div>

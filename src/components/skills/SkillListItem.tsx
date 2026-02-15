@@ -71,7 +71,7 @@ export function SkillListItem({
           <Badge
             variant="outline"
             className={cn(
-              "text-[10px] px-1.5 py-0",
+              "text-[0.625rem] px-1.5 py-0",
               skill.source === "global"
                 ? "border-green-500/40 text-green-600 dark:text-green-400"
                 : skill.source === "installed"

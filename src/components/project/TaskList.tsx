@@ -116,7 +116,7 @@ export function TaskList({ sessionId }: TaskListProps) {
             variant="ghost"
             size="sm"
             className={cn(
-              "h-6 px-2 text-[10px]",
+              "h-6 px-2 text-[0.625rem]",
               filter === tab.key && "bg-accent"
             )}
             onClick={() => setFilter(tab.key)}

@@ -83,10 +83,10 @@ function StreamingStatusBar({ statusText, onForceStop }: { statusText?: string; 
           <Shimmer duration={1.5}>{displayText}</Shimmer>
         </span>
         {isWarning && !isCritical && (
-          <span className="text-yellow-500 text-[10px]">Running longer than usual</span>
+          <span className="text-yellow-500 text-[0.625rem]">Running longer than usual</span>
         )}
         {isCritical && (
-          <span className="text-red-500 text-[10px]">Tool may be stuck</span>
+          <span className="text-red-500 text-[0.625rem]">Tool may be stuck</span>
         )}
       </div>
       <span className="text-muted-foreground/50">|</span>
@@ -95,7 +95,7 @@ function StreamingStatusBar({ statusText, onForceStop }: { statusText?: string; 
         <button
           type="button"
           onClick={onForceStop}
-          className="ml-auto rounded-md border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500 transition-colors hover:bg-red-500/20"
+          className="ml-auto rounded-md border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[0.625rem] font-medium text-red-500 transition-colors hover:bg-red-500/20"
         >
           Force stop
         </button>

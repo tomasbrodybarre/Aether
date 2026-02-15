@@ -46,7 +46,7 @@ export function ConnectionStatus() {
       <button
         onClick={() => setDialogOpen(true)}
         className={cn(
-          "flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium transition-colors",
+          "flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[0.6875rem] font-medium transition-colors",
           status === null
             ? "bg-muted text-muted-foreground"
             : connected

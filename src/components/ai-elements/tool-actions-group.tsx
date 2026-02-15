@@ -165,7 +165,7 @@ function ToolActionRow({ tool }: { tool: ToolAction }) {
       </span>
 
       {filePath && (category === 'read' || category === 'write') && (
-        <span className="text-muted-foreground/40 text-[11px] font-mono truncate max-w-[200px] hidden sm:inline">
+        <span className="text-muted-foreground/40 text-[0.6875rem] font-mono truncate max-w-[200px] hidden sm:inline">
           {truncatePath(filePath)}
         </span>
       )}
@@ -240,7 +240,7 @@ export function ToolActionsGroup({
           )}
         />
 
-        <span className="inline-flex items-center justify-center rounded bg-muted/80 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground/70 tabular-nums">
+        <span className="inline-flex items-center justify-center rounded bg-muted/80 px-1.5 py-0.5 text-[0.625rem] font-medium leading-none text-muted-foreground/70 tabular-nums">
           {tools.length}
         </span>
 
@@ -250,7 +250,7 @@ export function ToolActionsGroup({
 
         {/* Show running task description on the right */}
         {runningDesc && (
-          <span className="ml-auto text-muted-foreground/40 text-[11px] font-mono truncate max-w-[40%]">
+          <span className="ml-auto text-muted-foreground/40 text-[0.6875rem] font-mono truncate max-w-[40%]">
             {runningDesc}
           </span>
         )}

@@ -237,7 +237,7 @@ export function ImportSessionDialog({
                           {session.gitBranch && (
                             <Badge
                               variant="secondary"
-                              className="text-[10px] px-1.5 py-0 h-4 shrink-0"
+                              className="text-[0.625rem] px-1.5 py-0 h-4 shrink-0"
                             >
                               <HugeiconsIcon
                                 icon={GitBranchIcon}
@@ -279,7 +279,7 @@ export function ImportSessionDialog({
                     </div>
 
                     {/* Bottom row: metadata */}
-                    <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
+                    <div className="flex items-center gap-3 text-[0.625rem] text-muted-foreground/60">
                       <span
                         className="flex items-center gap-0.5 truncate"
                         title={session.cwd}

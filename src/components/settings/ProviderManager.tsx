@@ -242,11 +242,11 @@ export function ProviderManager() {
                 Environment variables detected
               </p>
               {hasActiveProvider ? (
-                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 text-muted-foreground">
+                <Badge variant="secondary" className="text-[0.625rem] px-1.5 py-0 text-muted-foreground">
                   Overridden
                 </Badge>
               ) : (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-green-600 dark:text-green-400 border-green-500/30">
+                <Badge variant="outline" className="text-[0.625rem] px-1.5 py-0 text-green-600 dark:text-green-400 border-green-500/30">
                   In use
                 </Badge>
               )}
@@ -329,11 +329,11 @@ export function ProviderManager() {
                       <span className="text-sm font-medium truncate">
                         {provider.name}
                       </span>
-                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                      <Badge variant="secondary" className="text-[0.625rem] px-1.5 py-0">
                         {provider.provider_type}
                       </Badge>
                       {isActive && (
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-green-600 dark:text-green-400 border-green-500/30">
+                        <Badge variant="outline" className="text-[0.625rem] px-1.5 py-0 text-green-600 dark:text-green-400 border-green-500/30">
                           Active
                         </Badge>
                       )}
@@ -411,7 +411,7 @@ export function ProviderManager() {
               key={preset.name}
               variant="outline"
               size="xs"
-              className="gap-1 text-[11px]"
+              className="gap-1 text-[0.6875rem]"
               onClick={() => handlePresetAdd(preset)}
             >
               <HugeiconsIcon icon={PlusSignIcon} className="h-2.5 w-2.5" />

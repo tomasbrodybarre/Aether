@@ -116,7 +116,7 @@ export function RightPanel({ width }: RightPanelProps) {
     <aside className="hidden h-full shrink-0 flex-col overflow-hidden bg-background lg:flex" style={{ width: width ?? 288 }}>
       {/* Header */}
       <div className="flex h-10 shrink-0 items-center justify-between px-4">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Chat Info</span>
+        <span className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">Chat Info</span>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -136,7 +136,7 @@ export function RightPanel({ width }: RightPanelProps) {
       <div className="flex-1 overflow-auto p-4 space-y-4">
         {/* Name - editable */}
         <div>
-          <label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70 mb-1.5 block">Name</label>
+          <label className="text-[0.6875rem] font-medium uppercase tracking-wider text-muted-foreground/70 mb-1.5 block">Name</label>
           {isEditingName ? (
             <div className="flex items-center gap-1.5">
               <Input
@@ -171,7 +171,7 @@ export function RightPanel({ width }: RightPanelProps) {
 
         {/* Files — always show FileTree */}
         <div className="flex flex-col min-h-0">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70 mb-1.5 block">Files</span>
+          <span className="text-[0.6875rem] font-medium uppercase tracking-wider text-muted-foreground/70 mb-1.5 block">Files</span>
           <div className="overflow-hidden">
             <FileTree
               workingDirectory={workingDirectory}

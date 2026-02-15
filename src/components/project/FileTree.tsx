@@ -153,7 +153,7 @@ export function FileTree({ workingDirectory, onFileSelect, onFileAdd }: FileTree
     <div className="flex flex-col">
       {/* Header */}
       <div className="flex items-center gap-2 p-2 border-b border-border/30">
-        <p className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground" title={workingDirectory}>
+        <p className="min-w-0 flex-1 truncate text-[0.6875rem] text-muted-foreground" title={workingDirectory}>
           {workingDirectory || 'No directory selected'}
         </p>
         <Button
