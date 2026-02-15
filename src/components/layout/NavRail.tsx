@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
@@ -25,7 +26,6 @@ import { cn } from "@/lib/utils";
 interface NavRailProps {
   chatListOpen: boolean;
   onToggleChatList: () => void;
-  hasUpdate?: boolean;
   skipPermissionsActive?: boolean;
 }
 
@@ -35,7 +35,7 @@ const navItems = [
   { href: "/settings", label: "Settings", icon: Settings02Icon },
 ] as const;
 
-export function NavRail({ chatListOpen, onToggleChatList, hasUpdate, skipPermissionsActive }: NavRailProps) {
+export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive }: NavRailProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { theme, setTheme } = useTheme();
@@ -47,7 +47,18 @@ export function NavRail({ chatListOpen, onToggleChatList, hasUpdate, skipPermiss
   }, []);
 
   return (
-    <aside className="flex w-14 shrink-0 flex-col items-center bg-sidebar pb-3 pt-10">
+    <aside className="flex w-14 shrink-0 flex-col items-center bg-sidebar pb-3 pt-3">
+      {/* Logo */}
+      <Link href="/chat" className="mb-3">
+        <Image
+          src="/aether_logo.png"
+          alt="Aether"
+          width={32}
+          height={32}
+          className=""
+        />
+      </Link>
+
       {/* New Chat */}
       <Tooltip>
         <TooltipTrigger asChild>
@@ -119,9 +130,6 @@ export function NavRail({ chatListOpen, onToggleChatList, hasUpdate, skipPermiss
                         <span className="sr-only">{item.label}</span>
                       </Link>
                     </Button>
-                    {item.href === "/settings" && hasUpdate && (
-                      <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-blue-500" />
-                    )}
                   </div>
                 )}
               </TooltipTrigger>

@@ -121,8 +121,8 @@ const MODE_OPTIONS: ModeOption[] = [
 
 // Default Claude model options — labels are dynamically overridden by active provider
 const DEFAULT_MODEL_OPTIONS = [
-  { value: 'sonnet', label: 'Sonnet 4.5' },
   { value: 'opus', label: 'Opus 4.6' },
+  { value: 'sonnet', label: 'Sonnet 4.5' },
   { value: 'haiku', label: 'Haiku 4.5' },
 ];
 
@@ -734,7 +734,7 @@ export function MessageInput({
     item.label.toLowerCase().includes(popoverFilter.toLowerCase())
   );
 
-  const currentModelValue = modelName || 'sonnet';
+  const currentModelValue = modelName || 'opus';
   const currentModelOption = MODEL_OPTIONS.find((m) => m.value === currentModelValue) || MODEL_OPTIONS[0];
   const currentMode = MODE_OPTIONS.find((m) => m.value === mode) || MODE_OPTIONS[0];
 

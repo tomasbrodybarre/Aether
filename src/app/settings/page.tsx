@@ -26,7 +26,6 @@ import {
   Loading02Icon,
 } from "@hugeicons/core-free-icons";
 import { ProviderManager } from "@/components/settings/ProviderManager";
-import { useUpdate } from "@/hooks/useUpdate";
 
 interface SettingsData {
   [key: string]: unknown;
@@ -59,60 +58,6 @@ export default function SettingsPage() {
     >
       <SettingsPageInner />
     </Suspense>
-  );
-}
-
-// --- About & Updates card ---
-function UpdateCard() {
-  const { updateInfo, checking, checkForUpdates } = useUpdate();
-  const currentVersion = process.env.NEXT_PUBLIC_APP_VERSION || "0.0.0";
-
-  return (
-    <div className="rounded-lg border border-border/50 p-4 transition-shadow hover:shadow-sm">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-medium">CodePilot</h2>
-          <p className="text-xs text-muted-foreground">Version {currentVersion}</p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={checkForUpdates}
-          disabled={checking}
-          className="gap-2"
-        >
-          {checking ? (
-            <HugeiconsIcon icon={Loading02Icon} className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <HugeiconsIcon icon={ReloadIcon} className="h-3.5 w-3.5" />
-          )}
-          {checking ? "Checking..." : "Check for Updates"}
-        </Button>
-      </div>
-
-      {updateInfo && !checking && (
-        <div className="mt-3">
-          {updateInfo.updateAvailable ? (
-            <div className="flex items-center gap-2">
-              <span className="h-2 w-2 rounded-full bg-blue-500" />
-              <span className="text-sm">
-                Update available: <span className="font-medium">v{updateInfo.latestVersion}</span>
-              </span>
-              <Button
-                variant="link"
-                size="sm"
-                className="h-auto p-0 text-sm"
-                onClick={() => window.open(updateInfo.releaseUrl, "_blank")}
-              >
-                View Release
-              </Button>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">You&apos;re on the latest version.</p>
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -277,13 +222,12 @@ function SettingsPageInner() {
       <div className="border-b border-border/50 px-6 pt-4 pb-4">
         <h1 className="text-xl font-semibold">Settings</h1>
         <p className="text-sm text-muted-foreground">
-          Manage CodePilot and Claude CLI settings
+          Manage Aether and Claude CLI settings
         </p>
       </div>
 
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-3xl space-y-6">
-          <UpdateCard />
           <ProviderManager />
 
           {/* Dangerous Settings */}

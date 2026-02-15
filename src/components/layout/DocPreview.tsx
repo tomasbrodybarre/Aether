@@ -11,7 +11,9 @@ import { atomOneLight } from "react-syntax-highlighter/dist/esm/styles/hljs";
 import { Streamdown } from "streamdown";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
+import { createMathPlugin } from "@streamdown/math";
+
+const math = createMathPlugin({ singleDollarTextMath: true });
 import { mermaid } from "@streamdown/mermaid";
 import type { FilePreview as FilePreviewType } from "@/types";
 
