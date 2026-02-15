@@ -80,6 +80,10 @@ function SettingsPageInner() {
   const [showSkipPermWarning, setShowSkipPermWarning] = useState(false);
   const [skipPermSaving, setSkipPermSaving] = useState(false);
 
+  // Font size state
+  const [fontSize, setFontSize] = useState(100);
+  const [fontSizeSaving, setFontSizeSaving] = useState(false);
+
   const fetchSettings = useCallback(async () => {
     try {
       const res = await fetch("/api/settings");
@@ -99,7 +103,7 @@ function SettingsPageInner() {
     }
   }, []);
 
-  // Fetch app-level settings (dangerously_skip_permissions)
+  // Fetch app-level settings (dangerously_skip_permissions, font_size)
   const fetchAppSettings = useCallback(async () => {
     try {
       const res = await fetch("/api/settings/app");
@@ -107,6 +111,9 @@ function SettingsPageInner() {
         const data = await res.json();
         const appSettings = data.settings || {};
         setSkipPermissions(appSettings.dangerously_skip_permissions === "true");
+        if (appSettings.font_size) {
+          setFontSize(parseInt(appSettings.font_size, 10) || 100);
+        }
       }
     } catch {
       // ignore
@@ -196,6 +203,25 @@ function SettingsPageInner() {
     }
   };
 
+  const saveFontSize = async (size: number) => {
+    setFontSizeSaving(true);
+    try {
+      const res = await fetch("/api/settings/app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { font_size: String(size) } }),
+      });
+      if (res.ok) {
+        setFontSize(size);
+        document.documentElement.style.fontSize = `${size}%`;
+      }
+    } catch {
+      // ignore
+    } finally {
+      setFontSizeSaving(false);
+    }
+  };
+
   const saveSkipPermissions = async (enabled: boolean) => {
     setSkipPermSaving(true);
     try {
@@ -229,6 +255,58 @@ function SettingsPageInner() {
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-3xl space-y-6">
           <ProviderManager />
+
+          {/* Display Settings */}
+          <div className="rounded-lg border border-border/50 p-4 transition-shadow hover:shadow-sm">
+            <h2 className="text-sm font-medium">Display</h2>
+            <p className="mb-4 text-xs text-muted-foreground">
+              Adjust the interface font size. Changes apply immediately.
+            </p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Small</span>
+                <span className="font-medium text-foreground">{fontSize}%</span>
+                <span>Large</span>
+              </div>
+              <input
+                type="range"
+                min={75}
+                max={150}
+                step={5}
+                value={fontSize}
+                onChange={(e) => setFontSize(parseInt(e.target.value, 10))}
+                onMouseUp={() => saveFontSize(fontSize)}
+                onTouchEnd={() => saveFontSize(fontSize)}
+                disabled={fontSizeSaving}
+                className="w-full accent-primary"
+              />
+              <div className="flex items-center justify-between">
+                <div className="flex gap-2">
+                  {[85, 100, 120].map((preset) => (
+                    <button
+                      key={preset}
+                      onClick={() => saveFontSize(preset)}
+                      className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                        fontSize === preset
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
+                      }`}
+                    >
+                      {preset === 85 ? "Small" : preset === 100 ? "Default" : "Large"}
+                    </button>
+                  ))}
+                </div>
+                {fontSize !== 100 && (
+                  <button
+                    onClick={() => saveFontSize(100)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
 
           {/* Dangerous Settings */}
           <div className={`rounded-lg border p-4 transition-shadow hover:shadow-sm ${skipPermissions ? "border-orange-500/50 bg-orange-500/5" : "border-border/50"}`}>

@@ -134,12 +134,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // --- Skip-permissions indicator ---
   const [skipPermissionsActive, setSkipPermissionsActive] = useState(false);
 
-  const fetchSkipPermissions = useCallback(async () => {
+  const fetchAppSettings = useCallback(async () => {
     try {
       const res = await fetch("/api/settings/app");
       if (res.ok) {
         const data = await res.json();
         setSkipPermissionsActive(data.settings?.dangerously_skip_permissions === "true");
+        // Apply font size
+        const fontSize = data.settings?.font_size;
+        if (fontSize) {
+          document.documentElement.style.fontSize = `${fontSize}%`;
+        }
       }
     } catch {
       // ignore
@@ -148,10 +153,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Poll periodically so the indicator stays in sync when settings change
   useEffect(() => {
-    fetchSkipPermissions();
-    const id = setInterval(fetchSkipPermissions, 5000);
+    fetchAppSettings();
+    const id = setInterval(fetchAppSettings, 5000);
     return () => clearInterval(id);
-  }, [fetchSkipPermissions]);
+  }, [fetchAppSettings]);
 
   const panelContextValue = useMemo(
     () => ({
