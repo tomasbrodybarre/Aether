@@ -188,6 +188,50 @@ export async function getClaudeVersion(claudePath: string): Promise<string | nul
 }
 
 /**
+ * Auth info from the Claude CLI credentials file (~/.claude/.credentials.json).
+ */
+export interface ClaudeAuthInfo {
+  /** 'cli' = Max subscription via `claude login`, 'api_key' = provider/env key, 'none' = nothing configured */
+  method: 'cli' | 'api_key' | 'none';
+  /** e.g. 'max', 'pro', or null */
+  subscriptionType: string | null;
+  /** e.g. 'default_claude_max_5x' or null */
+  rateLimitTier: string | null;
+  /** Whether the CLI OAuth token is expired */
+  expired: boolean;
+  /** ISO string of token expiry, or null */
+  expiresAt: string | null;
+}
+
+/**
+ * Read ~/.claude/.credentials.json to detect CLI login status and subscription.
+ * Falls back gracefully — returns method:'none' if file doesn't exist.
+ */
+export function getClaudeAuthInfo(): ClaudeAuthInfo {
+  const none: ClaudeAuthInfo = { method: 'none', subscriptionType: null, rateLimitTier: null, expired: false, expiresAt: null };
+  try {
+    const home = os.homedir();
+    const credPath = path.join(home, '.claude', '.credentials.json');
+    if (!fs.existsSync(credPath)) return none;
+    const raw = fs.readFileSync(credPath, 'utf-8');
+    const creds = JSON.parse(raw);
+    const oauth = creds?.claudeAiOauth;
+    if (!oauth || !oauth.accessToken) return none;
+    const expiresAt = typeof oauth.expiresAt === 'number' ? oauth.expiresAt : null;
+    const expired = expiresAt ? Date.now() > expiresAt : false;
+    return {
+      method: 'cli',
+      subscriptionType: oauth.subscriptionType || null,
+      rateLimitTier: oauth.rateLimitTier || null,
+      expired,
+      expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+    };
+  } catch {
+    return none;
+  }
+}
+
+/**
  * Find Git Bash (bash.exe) on Windows.
  * Returns the path to bash.exe or null if not found.
  */

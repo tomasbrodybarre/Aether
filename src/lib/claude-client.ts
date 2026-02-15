@@ -19,7 +19,7 @@ import type { ClaudeStreamOptions, SSEEvent, TokenUsage, MCPServerConfig, Permis
 import { isImageFile } from '@/types';
 import { registerPendingPermission } from './permission-registry';
 import { getSetting, getActiveProvider } from './db';
-import { findClaudeBinary, findGitBash, getExpandedPath } from './platform';
+import { findClaudeBinary, findGitBash, getExpandedPath, getClaudeAuthInfo } from './platform';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -173,6 +173,10 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
 
   return new ReadableStream<string>({
     async start(controller) {
+      // Buffer stderr across try/catch so error handler can include CLI output
+      let stderrBuffer = '';
+      const STDERR_BUFFER_MAX = 2000;
+
       try {
         // Build env for the Claude Code subprocess.
         // Start with process.env.
@@ -247,9 +251,12 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           if (appBaseUrl) {
             sdkEnv.ANTHROPIC_BASE_URL = appBaseUrl;
           }
-          // If neither legacy settings nor env vars provide a key, log a warning
+          // If neither legacy settings, env vars, nor CLI login provide auth, warn
           if (!appToken && !sdkEnv.ANTHROPIC_API_KEY && !sdkEnv.ANTHROPIC_AUTH_TOKEN) {
-            console.warn('[claude-client] No API key found: no active provider, no legacy settings, and no ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN in environment');
+            const cliAuth = getClaudeAuthInfo();
+            if (cliAuth.method !== 'cli') {
+              console.warn('[claude-client] No authentication found: no active provider, no legacy settings, no ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN in environment, and no CLI login (~/.claude/.credentials.json)');
+            }
           }
         }
 
@@ -375,8 +382,6 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
 
         // Capture real-time stderr output from Claude Code process
         queryOptions.stderr = (data: string) => {
-          // Diagnostic: log raw stderr data length to server console
-          console.log(`[stderr] received ${data.length} bytes, first 200 chars:`, data.slice(0, 200).replace(/[\x00-\x1F\x7F]/g, '?'));
           // Strip ANSI escape codes, OSC sequences, and control characters
           // but preserve tabs (\x09) and carriage returns (\x0D)
           const cleaned = data
@@ -390,6 +395,11 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
             .replace(/\n{3,}/g, '\n\n')                // Collapse multiple blank lines
             .trim();
           if (cleaned) {
+            // Keep last N chars of stderr for error context
+            stderrBuffer += (stderrBuffer ? '\n' : '') + cleaned;
+            if (stderrBuffer.length > STDERR_BUFFER_MAX) {
+              stderrBuffer = stderrBuffer.slice(-STDERR_BUFFER_MAX);
+            }
             controller.enqueue(formatSSE({
               type: 'tool_output',
               data: cleaned,
@@ -600,7 +610,40 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
         controller.enqueue(formatSSE({ type: 'done', data: '' }));
         controller.close();
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const rawMessage = error instanceof Error ? error.message : 'Unknown error';
+        // Log full error details for server-side debugging
+        console.error('[claude-client] Stream error:', rawMessage);
+        if (error instanceof Error && error.stack) {
+          console.error('[claude-client] Stack:', error.stack);
+        }
+        if (error && typeof error === 'object') {
+          // Log any extra properties the SDK might attach (exitCode, stderr, cause, etc.)
+          const extras = Object.keys(error).filter(k => k !== 'message' && k !== 'stack');
+          if (extras.length > 0) {
+            console.error('[claude-client] Extra error properties:', extras.map(k => `${k}=${JSON.stringify((error as Record<string, unknown>)[k])}`).join(', '));
+          }
+        }
+        console.error('[claude-client] Stderr buffer:', stderrBuffer || '(empty)');
+
+        // Enrich errors with stderr output and auth context
+        let errorMessage = rawMessage;
+
+        // Append buffered stderr — this is the actual reason the CLI failed
+        if (stderrBuffer.trim()) {
+          errorMessage += '\n\n**CLI output:**\n```\n' + stderrBuffer.trim() + '\n```';
+        }
+
+        // For exit code 1 errors, add auth context as a hint
+        if (rawMessage.includes('exited with code 1') || rawMessage.includes('exit code 1')) {
+          const authInfo = getClaudeAuthInfo();
+          const activeProvider = getActiveProvider();
+          if (authInfo.method === 'none' && !activeProvider?.api_key && !process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
+            errorMessage += '\n\nNo authentication configured. Run `claude login` in a terminal to sign in with your Max subscription, or configure an API key in Settings > Providers.';
+          } else if (authInfo.method === 'cli' && authInfo.expired) {
+            errorMessage += '\n\nYour CLI login token has expired. Run `claude login` in a terminal to re-authenticate.';
+          }
+        }
+
         controller.enqueue(formatSSE({ type: 'error', data: errorMessage }));
         controller.enqueue(formatSSE({ type: 'done', data: '' }));
         controller.close();

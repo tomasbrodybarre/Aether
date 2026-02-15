@@ -6,6 +6,7 @@ import { ChatView } from '@/components/chat/ChatView';
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Loading02Icon } from "@hugeicons/core-free-icons";
 import { usePanel } from '@/hooks/usePanel';
+import { ConnectionStatus } from '@/components/layout/ConnectionStatus';
 
 interface ChatSessionPageProps {
   params: Promise<{ id: string }>;
@@ -106,15 +107,17 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Chat title bar */}
-      {sessionTitle && (
-        <div
-          className="flex items-center justify-center px-4 py-2"
-        >
+      <div className="flex items-center px-4 py-2">
+        <div className="flex-1 min-w-0" />
+        {sessionTitle && (
           <h2 className="text-sm font-medium text-foreground/80 truncate max-w-md">
             {sessionTitle}
           </h2>
+        )}
+        <div className="flex-1 min-w-0 flex justify-end">
+          <ConnectionStatus />
         </div>
-      )}
+      </div>
       <ChatView key={id} sessionId={id} initialMessages={messages} modelName={sessionModel} initialMode={sessionMode} />
     </div>
   );

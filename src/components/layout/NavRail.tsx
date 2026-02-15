@@ -22,6 +22,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { ConnectionStatus } from "./ConnectionStatus";
 
 interface NavRailProps {
   chatListOpen: boolean;
@@ -139,8 +140,9 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
         })}
       </nav>
 
-      {/* Bottom: skip-permissions indicator + theme toggle */}
+      {/* Bottom: connection/auth status + skip-permissions indicator + theme toggle */}
       <div className="mt-auto flex flex-col items-center gap-2">
+        <ConnectionStatus compact />
         {skipPermissionsActive && (
           <Tooltip>
             <TooltipTrigger asChild>
