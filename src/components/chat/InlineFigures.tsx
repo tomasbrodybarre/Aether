@@ -1,12 +1,8 @@
 'use client';
 
-import { useState } from 'react';
-import { cn } from '@/lib/utils';
+import { useState, useEffect, useRef } from 'react';
 import { usePanel } from '@/hooks/usePanel';
-import { ImageThumbnail } from './ImageThumbnail';
 import { ImageLightbox } from './ImageLightbox';
-
-const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|svg|webp|bmp|tiff)$/i;
 
 interface ToolPair {
   name: string;
@@ -17,24 +13,16 @@ interface ToolPair {
 
 /**
  * Extract image file paths from bash command input and output text.
- * Matches:
- *  - Windows absolute: C:\path\to\figure.png
- *  - Unix absolute: /path/to/figure.png
- *  - Relative with prefix: ./figure.png, ../figures/plot.png
- *  - Bare relative: figure.png, outputs/correlation.png
  */
 function extractImagePaths(command: string, output: string): string[] {
   const combined = command + '\n' + output;
   const paths: string[] = [];
   const imgExts = 'png|jpg|jpeg|gif|svg|webp|bmp|tiff';
-  // Match any path-like token ending in an image extension.
-  // Captures: optional quotes, then the path (which may start with drive letter,
-  // /, ./, ../, or just a bare filename/relative path with subdirectories).
   const pathPattern = new RegExp(
     `(?:['"\`]?)` +
-    `([A-Za-z]:\\\\[^\\s'"\`<>|*?]+\\.(?:${imgExts})` +   // Windows absolute
-    `|(?:\\/|\\.\\/|\\.\\.\\/)[^\\s'"\`<>|*?]+\\.(?:${imgExts})` + // Unix absolute or ./  ../
-    `|[\\w][^\\s'"\`<>|*?]*\\.(?:${imgExts})` +            // Bare relative (filename or subdir/filename)
+    `([A-Za-z]:\\\\[^\\s'"\`<>|*?]+\\.(?:${imgExts})` +
+    `|(?:\\/|\\.\\/|\\.\\.\\/)[^\\s'"\`<>|*?]+\\.(?:${imgExts})` +
+    `|[\\w][^\\s'"\`<>|*?]*\\.(?:${imgExts})` +
     `)(?:['"\`]?)`,
     'gi'
   );
@@ -53,23 +41,88 @@ function isBashTool(name: string): boolean {
   return lower === 'bash' || lower === 'execute' || lower === 'run' || lower === 'shell' || lower === 'execute_command';
 }
 
-/**
- * Renders inline figures extracted from bash tool results.
- * Displayed at the message level (outside collapsed tool blocks) for notebook-like UX.
- */
-/**
- * Check if a path is absolute (Windows drive letter or Unix /).
- */
 function isAbsolutePath(p: string): boolean {
   return /^[A-Za-z]:[/\\]/.test(p) || p.startsWith('/');
+}
+
+// Module-level cache for default figure width
+let cachedDefaultWidth: number | null = null;
+
+function getDefaultFigureWidth(): number {
+  return cachedDefaultWidth ?? 100;
+}
+
+function ResizableFigure({
+  src,
+  alt,
+  onClick,
+}: {
+  src: string;
+  alt: string;
+  onClick: () => void;
+}) {
+  const [width, setWidth] = useState(getDefaultFigureWidth);
+
+  return (
+    <div style={{ width: `${width}%` }} className="min-w-[120px]">
+      <div className="rounded-lg overflow-hidden border border-border/30 bg-muted/20">
+        <button
+          type="button"
+          onClick={onClick}
+          className="w-full cursor-pointer hover:opacity-80 transition"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={alt}
+            className="w-full object-contain"
+          />
+        </button>
+        <div className="px-2 py-1.5 flex items-center gap-2">
+          <input
+            type="range"
+            min={20}
+            max={100}
+            step={5}
+            value={width}
+            onChange={(e) => setWidth(parseInt(e.target.value, 10))}
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 h-1 accent-primary cursor-pointer"
+            title={`${width}% width`}
+          />
+          <span className="text-[10px] text-muted-foreground tabular-nums w-8 text-right shrink-0">
+            {width}%
+          </span>
+        </div>
+        <div className="px-2 pb-1 text-xs text-muted-foreground truncate">{alt}</div>
+      </div>
+    </div>
+  );
 }
 
 export function InlineFigures({ tools }: { tools: ToolPair[] }) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const { workingDirectory } = usePanel();
+  const fetchedRef = useRef(false);
+  const [, setDefaultLoaded] = useState(false);
 
-  // Collect all image paths from bash tool results
+  // Fetch default figure width once
+  useEffect(() => {
+    if (fetchedRef.current || cachedDefaultWidth !== null) return;
+    fetchedRef.current = true;
+    fetch('/api/settings/app')
+      .then((r) => r.json())
+      .then((data) => {
+        const w = parseInt(data.settings?.default_figure_width, 10);
+        if (w >= 20 && w <= 100) {
+          cachedDefaultWidth = w;
+          setDefaultLoaded(true); // trigger re-render so ResizableFigure picks up the new default
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const allImagePaths: string[] = [];
   for (const tool of tools) {
     if (isBashTool(tool.name) && tool.result && !tool.isError) {
@@ -88,7 +141,6 @@ export function InlineFigures({ tools }: { tools: ToolPair[] }) {
 
   const images = allImagePaths.map((p, i) => {
     const params = new URLSearchParams({ path: p });
-    // For relative paths, pass the working directory so the API can resolve them
     if (!isAbsolutePath(p) && workingDirectory) {
       params.set('cwd', workingDirectory);
     }
@@ -99,25 +151,15 @@ export function InlineFigures({ tools }: { tools: ToolPair[] }) {
   });
 
   return (
-    <div className="my-2">
-      <div className={cn(
-        "grid gap-2",
-        images.length === 1 && "grid-cols-1 max-w-lg",
-        images.length === 2 && "grid-cols-2 max-w-2xl",
-        images.length >= 3 && "grid-cols-3 max-w-3xl",
-      )}>
-        {images.map((img, i) => (
-          <div key={img.src} className="rounded-lg overflow-hidden border border-border/30 bg-muted/20">
-            <ImageThumbnail
-              src={img.src}
-              alt={img.alt}
-              maxHeight="max-h-72"
-              onClick={() => { setLightboxIndex(i); setLightboxOpen(true); }}
-            />
-            <div className="px-2 py-1 text-xs text-muted-foreground truncate">{img.alt}</div>
-          </div>
-        ))}
-      </div>
+    <div className="my-2 space-y-2">
+      {images.map((img, i) => (
+        <ResizableFigure
+          key={img.src}
+          src={img.src}
+          alt={img.alt}
+          onClick={() => { setLightboxIndex(i); setLightboxOpen(true); }}
+        />
+      ))}
       <ImageLightbox
         images={images}
         initialIndex={lightboxIndex}

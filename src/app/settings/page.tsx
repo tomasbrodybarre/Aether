@@ -85,6 +85,10 @@ function SettingsPageInner() {
   const [fontSize, setFontSize] = useState(100);
   const [fontSizeSaving, setFontSizeSaving] = useState(false);
 
+  // Default figure width state
+  const [figureWidth, setFigureWidth] = useState(100);
+  const [figureWidthSaving, setFigureWidthSaving] = useState(false);
+
   // Default working directory state
   const [defaultWorkingDir, setDefaultWorkingDir] = useState('');
   const [defaultWorkingDirSaving, setDefaultWorkingDirSaving] = useState(false);
@@ -123,6 +127,9 @@ function SettingsPageInner() {
         }
         if (appSettings.default_working_directory) {
           setDefaultWorkingDir(appSettings.default_working_directory);
+        }
+        if (appSettings.default_figure_width) {
+          setFigureWidth(parseInt(appSettings.default_figure_width, 10) || 100);
         }
       }
     } catch {
@@ -232,6 +239,24 @@ function SettingsPageInner() {
     }
   };
 
+  const saveFigureWidth = async (size: number) => {
+    setFigureWidthSaving(true);
+    try {
+      const res = await fetch("/api/settings/app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { default_figure_width: String(size) } }),
+      });
+      if (res.ok) {
+        setFigureWidth(size);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setFigureWidthSaving(false);
+    }
+  };
+
   const saveSkipPermissions = async (enabled: boolean) => {
     setSkipPermSaving(true);
     try {
@@ -290,9 +315,12 @@ function SettingsPageInner() {
           <div className="rounded-lg border border-border/50 p-4 transition-shadow hover:shadow-sm">
             <h2 className="text-sm font-medium">Display</h2>
             <p className="mb-4 text-xs text-muted-foreground">
-              Adjust the interface font size. Changes apply immediately.
+              Adjust the interface appearance.
             </p>
+
+            {/* Font Size */}
             <div className="space-y-3">
+              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Font Size</h3>
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>Small</span>
                 <span className="font-medium text-foreground">{fontSize}%</span>
@@ -329,6 +357,58 @@ function SettingsPageInner() {
                 {fontSize !== 100 && (
                   <button
                     onClick={() => saveFontSize(100)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <hr className="my-4 border-border/30" />
+
+            {/* Default Figure Width */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Default Figure Width</h3>
+              <p className="text-xs text-muted-foreground">
+                Initial width for inline images. Each image can be resized individually in chat.
+              </p>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>Narrow</span>
+                <span className="font-medium text-foreground">{figureWidth}%</span>
+                <span>Full</span>
+              </div>
+              <input
+                type="range"
+                min={20}
+                max={100}
+                step={5}
+                value={figureWidth}
+                onChange={(e) => setFigureWidth(parseInt(e.target.value, 10))}
+                onMouseUp={() => saveFigureWidth(figureWidth)}
+                onTouchEnd={() => saveFigureWidth(figureWidth)}
+                disabled={figureWidthSaving}
+                className="w-full accent-primary"
+              />
+              <div className="flex items-center justify-between">
+                <div className="flex gap-2">
+                  {[50, 75, 100].map((preset) => (
+                    <button
+                      key={preset}
+                      onClick={() => saveFigureWidth(preset)}
+                      className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                        figureWidth === preset
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
+                      }`}
+                    >
+                      {preset === 50 ? "Half" : preset === 75 ? "Three-quarter" : "Full"}
+                    </button>
+                  ))}
+                </div>
+                {figureWidth !== 100 && (
+                  <button
+                    onClick={() => saveFigureWidth(100)}
                     className="text-xs text-muted-foreground hover:text-foreground"
                   >
                     Reset
