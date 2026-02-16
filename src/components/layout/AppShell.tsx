@@ -29,7 +29,7 @@ function defaultViewMode(filePath: string): PreviewViewMode {
 const LG_BREAKPOINT = 1024;
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
 
   const [chatListOpen, setChatListOpenRaw] = useState(false);
 
