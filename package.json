@@ -8,6 +8,7 @@
   },
   "description": "A web-based GUI for Claude Code, optimized for scientific workflows",
   "scripts": {
+    "predev": "node scripts/cleanup-port.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
