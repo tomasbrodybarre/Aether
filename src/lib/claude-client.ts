@@ -291,18 +291,27 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           queryOptions.model = model;
         }
 
-        // Always append scientific-workflow guidance for inline figure rendering.
-        // MPLBACKEND=Agg (set above) prevents GUI windows, but Claude also needs to
-        // save figures to files so our InlineFigures component can detect and render them.
-        // Key: Claude must print the absolute path so InlineFigures can extract it from
-        // the bash tool output and the file-serving API can resolve it.
-        const scienceLabPreamble = [
-          'When writing Python code that produces plots or figures:',
-          '- Save figures with plt.savefig() using ABSOLUTE paths (e.g. plt.savefig(os.path.join(os.getcwd(), "figure.png"), dpi=150, bbox_inches="tight"))',
-          '- After saving, ALWAYS print the absolute path: print(os.path.abspath("figure.png"))',
-          '- Do NOT call plt.show() — this environment renders saved figures inline automatically',
+        // Aether environment marker — tells Claude this is an Aether session and
+        // what extra capabilities are available beyond raw CLI.
+        const aetherPreamble = [
+          '# Aether Environment',
+          'This session is mediated by Aether, a web-based GUI wrapper around Claude Code.',
+          'You are NOT running in a raw CLI terminal. The user sees a rich web interface.',
+          '',
+          '## Aether capabilities (not available in raw CLI):',
+          '- **Inline image rendering**: Image file paths in tool output (Bash, Glob, Read, etc.) are detected and rendered inline with a resize slider. Supported: png, jpg, jpeg, gif, svg, webp, bmp, tiff.',
+          '- **Rich text rendering**: Markdown, LaTeX ($...$ and $$...$$), syntax-highlighted code, and GFM tables all render natively in the chat.',
+          '- **Message queueing**: The user can queue a follow-up message while you are still streaming. They can also interrupt you (Escape or red Interrupt button) to force-send a message immediately.',
+          '- **Labeled outputs**: Assistant messages are labeled Out[N] for easy reference.',
+          '',
+          '## How to render images inline:',
+          'For the image to appear, the **absolute file path** must appear in a tool result.',
+          '- Python: save with `plt.savefig()` using ABSOLUTE paths, then `print(os.path.abspath("figure.png"))`',
+          '- Bash: `echo "/absolute/path/to/figure.png"`',
+          '- Do NOT call `plt.show()` — Aether renders saved figures inline automatically',
+          '- Use `dpi=150, bbox_inches="tight"` for clean output',
           '- Use descriptive filenames (e.g. "correlation_matrix.png", "time_series.png")',
-          '- Always import os at the top of scripts that save figures',
+          '- Always `import os` at the top of scripts that save figures',
         ].join('\n');
 
         // Read CLAUDE.md files from the working directory hierarchy,
@@ -315,10 +324,10 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           : 'If CLAUDE.md contains startup instructions (e.g. "On Startup"), execute them silently without narration, then address the user\'s request directly.';
 
         const fullAppend = [
+          aetherPreamble,
           claudeMdInstructions,
           preReadContent,
           silentStartupNote,
-          scienceLabPreamble,
           systemPrompt,
         ].filter(Boolean).join('\n\n');
 
