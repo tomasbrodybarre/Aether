@@ -305,11 +305,19 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           '- Always import os at the top of scripts that save figures',
         ].join('\n');
 
-        // Read CLAUDE.md files from the working directory hierarchy
-        const claudeMdContent = readClaudeMdFiles(workingDirectory || process.cwd());
+        // Read CLAUDE.md files from the working directory hierarchy,
+        // execute aether:init directives (read: files, exec: commands)
+        const cwd = workingDirectory || process.cwd();
+        const { instructions: claudeMdInstructions, preReadContent } = readClaudeMdFiles(cwd);
+
+        const silentStartupNote = preReadContent
+          ? 'The files above were pre-loaded per CLAUDE.md startup directives — do not re-read them. If CLAUDE.md contains additional startup instructions not covered by the pre-loaded content, execute them silently without narration, then address the user\'s request directly.'
+          : 'If CLAUDE.md contains startup instructions (e.g. "On Startup"), execute them silently without narration, then address the user\'s request directly.';
 
         const fullAppend = [
-          claudeMdContent,
+          claudeMdInstructions,
+          preReadContent,
+          silentStartupNote,
           scienceLabPreamble,
           systemPrompt,
         ].filter(Boolean).join('\n\n');
@@ -331,6 +339,25 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
 
         // Permission handler: sends SSE event and waits for user response
         queryOptions.canUseTool = async (toolName, input, opts) => {
+          // Auto-approve read-only operations on the claude-memory repo
+          const memoryDir = path.resolve(cwd, 'claude-memory');
+          const isMemoryPath = (p: string) => {
+            const resolved = path.resolve(cwd, p);
+            return resolved === memoryDir || resolved.startsWith(memoryDir + path.sep);
+          };
+
+          if (toolName === 'Read' && typeof input.file_path === 'string' && isMemoryPath(input.file_path)) {
+            return { behavior: 'allow' as const };
+          }
+          if (toolName === 'Bash' && typeof input.command === 'string') {
+            const cmd = input.command.trim();
+            // Allow read-only git operations on claude-memory only
+            if (/^git\s+(-C\s+\S*claude-memory\S*\s+)?(pull|fetch|status|log|diff)\b/.test(cmd) &&
+                cmd.includes('claude-memory')) {
+              return { behavior: 'allow' as const };
+            }
+          }
+
           const permissionRequestId = `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
           const permEvent: PermissionRequestEvent = {
