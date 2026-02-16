@@ -20,7 +20,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
   const [sessionTitle, setSessionTitle] = useState<string>('');
   const [sessionModel, setSessionModel] = useState<string>('');
   const [sessionMode, setSessionMode] = useState<string>('');
-  const { setWorkingDirectory, setSessionId, setSessionTitle: setPanelSessionTitle, setPanelOpen } = usePanel();
+  const { setWorkingDirectory, setSessionId, setSessionTitle: setPanelSessionTitle } = usePanel();
 
   // Load session info and set working directory
   useEffect(() => {
@@ -33,7 +33,6 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
             setWorkingDirectory(data.session.working_directory);
           }
           setSessionId(id);
-          setPanelOpen(true);
           const title = data.session.title || 'New Conversation';
           setSessionTitle(title);
           setPanelSessionTitle(title);
@@ -46,7 +45,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
     }
 
     loadSession();
-  }, [id, setWorkingDirectory, setSessionId, setPanelSessionTitle, setPanelOpen]);
+  }, [id, setWorkingDirectory, setSessionId, setPanelSessionTitle]);
 
   useEffect(() => {
     // Reset state when switching sessions

@@ -25,7 +25,7 @@ interface ChatViewProps {
 }
 
 export function ChatView({ sessionId, initialMessages = [], modelName, initialMode }: ChatViewProps) {
-  const { setStreamingSessionId, workingDirectory, setWorkingDirectory, setPanelOpen, setPendingApprovalSessionId } = usePanel();
+  const { setStreamingSessionId, workingDirectory, setWorkingDirectory, setPendingApprovalSessionId } = usePanel();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [streamingContent, setStreamingContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -57,7 +57,6 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
 
   const handleWorkingDirectoryChange = useCallback((dir: string) => {
     setWorkingDirectory(dir);
-    setPanelOpen(true);
     // Persist to database
     if (sessionId) {
       fetch(`/api/chat/sessions/${sessionId}`, {
@@ -66,7 +65,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
         body: JSON.stringify({ working_directory: dir }),
       }).catch(() => { /* silent */ });
     }
-  }, [sessionId, setWorkingDirectory, setPanelOpen]);
+  }, [sessionId, setWorkingDirectory]);
 
   // Ref to keep accumulated streaming content in sync regardless of React batching
   const accumulatedRef = useRef('');

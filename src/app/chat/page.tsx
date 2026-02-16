@@ -20,7 +20,7 @@ interface ToolResultInfo {
 
 export default function NewChatPage() {
   const router = useRouter();
-  const { setWorkingDirectory, setPanelOpen, setPendingApprovalSessionId } = usePanel();
+  const { setWorkingDirectory, setPendingApprovalSessionId } = usePanel();
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamingContent, setStreamingContent] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -58,8 +58,7 @@ export default function NewChatPage() {
   const handleWorkingDirectoryChange = useCallback((dir: string) => {
     setWorkingDir(dir);
     setWorkingDirectory(dir);
-    setPanelOpen(true);
-  }, [setWorkingDirectory, setPanelOpen]);
+  }, [setWorkingDirectory]);
 
   const stopStreaming = useCallback(() => {
     abortControllerRef.current?.abort();
