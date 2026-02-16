@@ -37,6 +37,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
   const [pendingPermission, setPendingPermission] = useState<PermissionRequestEvent | null>(null);
   const [permissionResolved, setPermissionResolved] = useState<'allow' | 'deny' | null>(null);
   const [streamingToolOutput, setStreamingToolOutput] = useState('');
+  const [queuedMessage, setQueuedMessage] = useState<{ content: string; files?: FileAttachment[] } | null>(null);
   const toolTimeoutRef = useRef<{ toolName: string; elapsedSeconds: number } | null>(null);
 
   const handleModeChange = useCallback((newMode: string) => {
@@ -154,7 +155,11 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
 
   const sendMessage = useCallback(
     async (content: string, files?: FileAttachment[]) => {
-      if (isStreaming) return;
+      if (isStreaming) {
+        // Queue the message — it will be sent when streaming completes
+        setQueuedMessage({ content, files });
+        return;
+      }
 
       // Build display content: embed file metadata as HTML comment for MessageItem to parse
       let displayContent = content;
@@ -471,6 +476,16 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
   // Keep sendMessageRef in sync so timeout auto-retry can call it
   sendMessageRef.current = sendMessage;
 
+  // Auto-send queued message when streaming completes
+  useEffect(() => {
+    if (!isStreaming && queuedMessage) {
+      const { content, files } = queuedMessage;
+      setQueuedMessage(null);
+      // Small delay to let cleanup state settle before starting a new stream
+      setTimeout(() => sendMessage(content, files), 100);
+    }
+  }, [isStreaming, queuedMessage, sendMessage]);
+
   const handleCommand = useCallback((command: string) => {
     switch (command) {
       case '/help': {
@@ -566,6 +581,8 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
         onStop={stopStreaming}
         disabled={false}
         isStreaming={isStreaming}
+        hasQueuedMessage={!!queuedMessage}
+        onClearQueue={() => setQueuedMessage(null)}
         sessionId={sessionId}
         modelName={currentModel}
         onModelChange={setCurrentModel}

@@ -57,6 +57,8 @@ interface MessageInputProps {
   onStop?: () => void;
   disabled?: boolean;
   isStreaming?: boolean;
+  hasQueuedMessage?: boolean;
+  onClearQueue?: () => void;
   sessionId?: string;
   modelName?: string;
   onModelChange?: (model: string) => void;
@@ -218,12 +220,26 @@ function FileAwareSubmitButton({
   const attachments = usePromptInputAttachments();
   const hasFiles = attachments.files.length > 0;
   const isStreaming = status === 'streaming' || status === 'submitted';
+  const hasInput = !!inputValue.trim() || hasBadge || hasFiles;
+
+  // During streaming: if user has typed text, show send (queue) button; otherwise show stop
+  if (isStreaming && hasInput) {
+    return (
+      <PromptInputSubmit
+        status="ready"
+        disabled={disabled}
+        className="rounded-full"
+      >
+        <HugeiconsIcon icon={ArrowUp02Icon} className="h-4 w-4" strokeWidth={2} />
+      </PromptInputSubmit>
+    );
+  }
 
   return (
     <PromptInputSubmit
       status={status}
       onStop={onStop}
-      disabled={disabled || (!isStreaming && !inputValue.trim() && !hasBadge && !hasFiles)}
+      disabled={disabled || (!isStreaming && !hasInput)}
       className="rounded-full"
     >
       {isStreaming ? (
@@ -336,6 +352,8 @@ export function MessageInput({
   onStop,
   disabled,
   isStreaming,
+  hasQueuedMessage,
+  onClearQueue,
   sessionId,
   modelName,
   onModelChange,
@@ -398,14 +416,20 @@ export function MessageInput({
     }
   }, [sessionMessages]);
 
-  // Re-focus textarea when streaming ends
+  // Re-focus textarea when streaming ends; clear input if queued message was just dispatched
   const wasStreamingRef = useRef(false);
+  const hadQueueRef = useRef(false);
   useEffect(() => {
     if (wasStreamingRef.current && !isStreaming) {
+      // Queued message was just sent — clear the input
+      if (hadQueueRef.current) {
+        setInputValue('');
+      }
       textareaRef.current?.focus();
     }
     wasStreamingRef.current = !!isStreaming;
-  }, [isStreaming]);
+    hadQueueRef.current = !!hasQueuedMessage;
+  }, [isStreaming, hasQueuedMessage]);
 
   // Compute model options based on active provider
   const MODEL_OPTIONS = DEFAULT_MODEL_OPTIONS.map((opt) => {
@@ -605,7 +629,7 @@ export function MessageInput({
     };
 
     // If badge is active, expand the command/skill and send
-    if (badge && !isStreaming) {
+    if (badge) {
       let expandedPrompt = '';
 
       if (badge.isSkill) {
@@ -649,7 +673,7 @@ export function MessageInput({
     const files = await convertFiles();
     const hasFiles = files.length > 0;
 
-    if ((!content && !hasFiles) || disabled || isStreaming) return;
+    if ((!content && !hasFiles) || disabled) return;
 
     // Check if it's a direct slash command typed in the input
     if (content.startsWith('/') && !hasFiles) {
@@ -693,7 +717,10 @@ export function MessageInput({
     setHistoryIndex(-1);
     setSavedInput('');
     onSend(textToSend, hasFiles ? files : undefined);
-    setInputValue('');
+    // When streaming, keep input text so user can edit the queued message
+    if (!isStreaming) {
+      setInputValue('');
+    }
   }, [inputValue, onSend, onCommand, disabled, isStreaming, closePopover, badge, promptHistory]);
 
   const handleKeyDown = useCallback(
@@ -982,12 +1009,27 @@ export function MessageInput({
                 </span>
               </div>
             )}
+            {/* Queued message indicator */}
+            {hasQueuedMessage && (
+              <div className="flex w-full items-center justify-between px-3 pt-2 pb-0 order-first">
+                <span className="text-[0.6875rem] text-amber-600 dark:text-amber-400 font-medium">
+                  Queued — will send when response completes. Edit below or press Enter to update.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { onClearQueue?.(); setInputValue(''); }}
+                  className="text-[0.625rem] text-muted-foreground hover:text-foreground transition-colors ml-2 shrink-0"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
             {/* File attachment capsules */}
             <FileAttachmentsCapsules />
             <div className="relative">
               <PromptInputTextarea
                 ref={textareaRef}
-                placeholder={badge ? "Add details (optional), then press Enter..." : "Message Claude..."}
+                placeholder={hasQueuedMessage ? "Edit queued message..." : badge ? "Add details (optional), then press Enter..." : "Message Claude..."}
                 value={inputValue}
                 onChange={(e) => handleInputChange(e.currentTarget.value)}
                 onKeyDown={handleKeyDown}
