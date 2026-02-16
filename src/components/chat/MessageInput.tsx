@@ -55,6 +55,7 @@ interface MessageInputProps {
   onSend: (content: string, files?: FileAttachment[]) => void;
   onCommand?: (command: string) => void;
   onStop?: () => void;
+  onInterrupt?: (message?: { content: string; files?: FileAttachment[] }) => void;
   disabled?: boolean;
   isStreaming?: boolean;
   hasQueuedMessage?: boolean;
@@ -350,6 +351,7 @@ export function MessageInput({
   onSend,
   onCommand,
   onStop,
+  onInterrupt,
   disabled,
   isStreaming,
   hasQueuedMessage,
@@ -765,6 +767,19 @@ export function MessageInput({
         return;
       }
 
+      // Escape during streaming = interrupt
+      if (e.key === 'Escape' && isStreaming && onInterrupt) {
+        e.preventDefault();
+        const content = inputValue.trim();
+        if (content) {
+          onInterrupt({ content });
+          setInputValue('');
+        } else {
+          onInterrupt();
+        }
+        return;
+      }
+
       // Prompt history navigation (only when popover is closed and input is empty)
       if (e.key === 'ArrowUp' && !popoverMode && promptHistory.length > 0 && inputValue.trim() === '') {
         e.preventDefault();
@@ -799,7 +814,7 @@ export function MessageInput({
         return;
       }
     },
-    [popoverMode, popoverItems, popoverFilter, selectedIndex, insertItem, closePopover, badge, inputValue, removeBadge, promptHistory, historyIndex, savedInput]
+    [popoverMode, popoverItems, popoverFilter, selectedIndex, insertItem, closePopover, badge, inputValue, removeBadge, promptHistory, historyIndex, savedInput, isStreaming, onInterrupt]
   );
 
   // Click outside to close popover
@@ -1015,13 +1030,26 @@ export function MessageInput({
                 <span className="text-[0.6875rem] text-amber-600 dark:text-amber-400 font-medium">
                   Queued — will send when response completes. Edit below or press Enter to update.
                 </span>
-                <button
-                  type="button"
-                  onClick={() => { onClearQueue?.(); setInputValue(''); }}
-                  className="text-[0.625rem] text-muted-foreground hover:text-foreground transition-colors ml-2 shrink-0"
-                >
-                  Cancel
-                </button>
+                <div className="flex items-center gap-2 ml-2 shrink-0">
+                  {isStreaming && onInterrupt && (
+                    <button
+                      type="button"
+                      onClick={() => onInterrupt()}
+                      className="inline-flex items-center gap-1 rounded-md bg-red-500/10 border border-red-500/30 px-2 py-0.5 text-[0.625rem] font-medium text-red-600 dark:text-red-400 hover:bg-red-500/20 transition-colors"
+                      title="Interrupt: stop current response and send queued message now (Esc)"
+                    >
+                      <HugeiconsIcon icon={Cancel01Icon} className="h-3 w-3" />
+                      Interrupt
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { onClearQueue?.(); setInputValue(''); }}
+                    className="text-[0.625rem] text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
             {/* File attachment capsules */}

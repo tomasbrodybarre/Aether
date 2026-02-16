@@ -12,10 +12,11 @@ interface ToolPair {
 }
 
 /**
- * Extract image file paths from bash command input and output text.
+ * Extract image file paths from bash tool output.
+ * Only scans the output (not the command) to avoid false positives from
+ * code that mentions image extensions in variable names or comments.
  */
-function extractImagePaths(command: string, output: string): string[] {
-  const combined = command + '\n' + output;
+function extractImagePaths(_command: string, output: string): string[] {
   const paths: string[] = [];
   const imgExts = 'png|jpg|jpeg|gif|svg|webp|bmp|tiff';
   const pathPattern = new RegExp(
@@ -27,7 +28,7 @@ function extractImagePaths(command: string, output: string): string[] {
     'gi'
   );
   let match;
-  while ((match = pathPattern.exec(combined)) !== null) {
+  while ((match = pathPattern.exec(output)) !== null) {
     const p = match[1];
     if (p && !paths.includes(p)) {
       paths.push(p);
@@ -62,6 +63,9 @@ function ResizableFigure({
   onClick: () => void;
 }) {
   const [width, setWidth] = useState(getDefaultFigureWidth);
+  const [failed, setFailed] = useState(false);
+
+  if (failed) return null;
 
   return (
     <div style={{ width: `${width}%` }} className="min-w-[120px]">
@@ -76,6 +80,7 @@ function ResizableFigure({
             src={src}
             alt={alt}
             className="w-full object-contain"
+            onError={() => setFailed(true)}
           />
         </button>
         <div className="px-2 py-1.5 flex items-center gap-2">

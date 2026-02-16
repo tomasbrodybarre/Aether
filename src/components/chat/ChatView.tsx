@@ -117,6 +117,18 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
     abortControllerRef.current = null;
   }, []);
 
+  // Interrupt: abort current stream and immediately send queued/typed message
+  const interruptRef = useRef(false);
+  const interruptStreaming = useCallback((interruptMessage?: { content: string; files?: FileAttachment[] }) => {
+    if (!isStreaming) return;
+    if (interruptMessage) {
+      interruptRef.current = true;
+      setQueuedMessage(interruptMessage);
+    }
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+  }, [isStreaming]);
+
   const handlePermissionResponse = useCallback(async (decision: 'allow' | 'allow_session' | 'deny') => {
     if (!pendingPermission) return;
 
@@ -475,13 +487,15 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
   // Keep sendMessageRef in sync so timeout auto-retry can call it
   sendMessageRef.current = sendMessage;
 
-  // Auto-send queued message when streaming completes
+  // Auto-send queued message when streaming completes (or on interrupt)
   useEffect(() => {
     if (!isStreaming && queuedMessage) {
       const { content, files } = queuedMessage;
+      const wasInterrupt = interruptRef.current;
+      interruptRef.current = false;
       setQueuedMessage(null);
-      // Small delay to let cleanup state settle before starting a new stream
-      setTimeout(() => sendMessage(content, files), 100);
+      // On interrupt: send immediately. On normal completion: small delay for cleanup.
+      setTimeout(() => sendMessage(content, files), wasInterrupt ? 0 : 100);
     }
   }, [isStreaming, queuedMessage, sendMessage]);
 
@@ -578,6 +592,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
         onSend={sendMessage}
         onCommand={handleCommand}
         onStop={stopStreaming}
+        onInterrupt={interruptStreaming}
         disabled={false}
         isStreaming={isStreaming}
         hasQueuedMessage={!!queuedMessage}
