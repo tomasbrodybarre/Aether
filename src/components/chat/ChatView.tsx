@@ -201,6 +201,9 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
       abortControllerRef.current = controller;
 
       let accumulated = '';
+      // Track tool events for inclusion in saved message content
+      const toolUsesAccum: ToolUseInfo[] = [];
+      const toolResultsAccum: ToolResultInfo[] = [];
 
       try {
         const response = await fetch('/api/chat', {
@@ -256,15 +259,19 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
                     const toolData = JSON.parse(event.data);
                     // Clear streaming output for new tool
                     setStreamingToolOutput('');
+                    const toolInfo = {
+                      id: toolData.id,
+                      name: toolData.name,
+                      input: toolData.input,
+                    };
                     setToolUses((prev) => {
                       // Avoid duplicates
                       if (prev.some((t) => t.id === toolData.id)) return prev;
-                      return [...prev, {
-                        id: toolData.id,
-                        name: toolData.name,
-                        input: toolData.input,
-                      }];
+                      return [...prev, toolInfo];
                     });
+                    if (!toolUsesAccum.some((t) => t.id === toolData.id)) {
+                      toolUsesAccum.push(toolInfo);
+                    }
                   } catch {
                     // skip malformed tool_use data
                   }
@@ -275,10 +282,12 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
                   try {
                     const resultData = JSON.parse(event.data);
                     setStreamingToolOutput('');
-                    setToolResults((prev) => [...prev, {
+                    const resultInfo = {
                       tool_use_id: resultData.tool_use_id,
                       content: resultData.content,
-                    }]);
+                    };
+                    setToolResults((prev) => [...prev, resultInfo]);
+                    toolResultsAccum.push(resultInfo);
                   } catch {
                     // skip malformed tool_result data
                   }
@@ -380,13 +389,31 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
           }
         }
 
+        // Build message content: include tool blocks if any tools were used
+        const buildContent = (): string => {
+          if (toolUsesAccum.length === 0) return accumulated.trim();
+          // Build JSON array with text + tool_use + tool_result blocks
+          const blocks: unknown[] = [];
+          if (accumulated.trim()) {
+            blocks.push({ type: 'text', text: accumulated.trim() });
+          }
+          for (const tu of toolUsesAccum) {
+            blocks.push({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input });
+            const tr = toolResultsAccum.find((r) => r.tool_use_id === tu.id);
+            if (tr) {
+              blocks.push({ type: 'tool_result', tool_use_id: tu.id, content: tr.content });
+            }
+          }
+          return JSON.stringify(blocks);
+        };
+
         // Add the assistant message to the list
-        if (accumulated.trim()) {
+        if (accumulated.trim() || toolUsesAccum.length > 0) {
           const assistantMessage: Message = {
             id: 'temp-assistant-' + Date.now(),
             session_id: sessionId,
             role: 'assistant',
-            content: accumulated.trim(),
+            content: buildContent(),
             created_at: new Date().toISOString(),
             token_usage: tokenUsage ? JSON.stringify(tokenUsage) : null,
           };

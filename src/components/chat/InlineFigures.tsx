@@ -37,9 +37,12 @@ function extractImagePaths(_command: string, output: string): string[] {
   return paths;
 }
 
-function isBashTool(name: string): boolean {
+/** Tools whose output may contain image file paths. */
+function canContainImagePaths(name: string): boolean {
   const lower = name.toLowerCase();
-  return lower === 'bash' || lower === 'execute' || lower === 'run' || lower === 'shell' || lower === 'execute_command';
+  return lower === 'bash' || lower === 'execute' || lower === 'run' || lower === 'shell'
+    || lower === 'execute_command' || lower === 'glob' || lower === 'read'
+    || lower === 'write' || lower === 'list' || lower === 'tool_result';
 }
 
 function isAbsolutePath(p: string): boolean {
@@ -63,6 +66,7 @@ function ResizableFigure({
   onClick: () => void;
 }) {
   const [width, setWidth] = useState(getDefaultFigureWidth);
+  const [sliderValue, setSliderValue] = useState(getDefaultFigureWidth);
   const [failed, setFailed] = useState(false);
 
   if (failed) return null;
@@ -89,14 +93,16 @@ function ResizableFigure({
             min={20}
             max={100}
             step={5}
-            value={width}
-            onChange={(e) => setWidth(parseInt(e.target.value, 10))}
+            value={sliderValue}
+            onChange={(e) => setSliderValue(parseInt(e.target.value, 10))}
+            onMouseUp={() => setWidth(sliderValue)}
+            onTouchEnd={() => setWidth(sliderValue)}
             onClick={(e) => e.stopPropagation()}
             className="flex-1 h-1 accent-primary cursor-pointer"
-            title={`${width}% width`}
+            title={`${sliderValue}% width`}
           />
           <span className="text-[10px] text-muted-foreground tabular-nums w-8 text-right shrink-0">
-            {width}%
+            {sliderValue}%
           </span>
         </div>
         <div className="px-2 pb-1 text-xs text-muted-foreground truncate">{alt}</div>
@@ -130,10 +136,8 @@ export function InlineFigures({ tools }: { tools: ToolPair[] }) {
 
   const allImagePaths: string[] = [];
   for (const tool of tools) {
-    if (isBashTool(tool.name) && tool.result && !tool.isError) {
-      const inp = tool.input as Record<string, unknown> | undefined;
-      const command = (inp?.command || inp?.cmd || '') as string;
-      const paths = extractImagePaths(command, tool.result);
+    if (canContainImagePaths(tool.name) && tool.result && !tool.isError) {
+      const paths = extractImagePaths('', tool.result);
       for (const p of paths) {
         if (!allImagePaths.includes(p)) {
           allImagePaths.push(p);
@@ -146,7 +150,7 @@ export function InlineFigures({ tools }: { tools: ToolPair[] }) {
 
   const images = allImagePaths.map((p, i) => {
     const params = new URLSearchParams({ path: p });
-    if (!isAbsolutePath(p) && workingDirectory) {
+    if (workingDirectory) {
       params.set('cwd', workingDirectory);
     }
     return {
