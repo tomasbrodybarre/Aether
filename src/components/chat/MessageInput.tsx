@@ -398,6 +398,15 @@ export function MessageInput({
     }
   }, [sessionMessages]);
 
+  // Re-focus textarea when streaming ends
+  const wasStreamingRef = useRef(false);
+  useEffect(() => {
+    if (wasStreamingRef.current && !isStreaming) {
+      textareaRef.current?.focus();
+    }
+    wasStreamingRef.current = !!isStreaming;
+  }, [isStreaming]);
+
   // Compute model options based on active provider
   const MODEL_OPTIONS = DEFAULT_MODEL_OPTIONS.map((opt) => {
     if (activeProviderBaseUrl && PROVIDER_MODEL_LABELS[activeProviderBaseUrl]) {
@@ -983,6 +992,7 @@ export function MessageInput({
                 onChange={(e) => handleInputChange(e.currentTarget.value)}
                 onKeyDown={handleKeyDown}
                 disabled={disabled}
+                autoFocus
                 className="min-h-10"
               />
               {historyIndex !== -1 && (
