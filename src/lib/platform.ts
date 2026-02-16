@@ -176,7 +176,11 @@ export function findClaudeBinary(): string | undefined {
  */
 export async function getClaudeVersion(claudePath: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync(claudePath, ['--version'], {
+    // If the path is a .js file (resolved from .cmd on Windows), run via node
+    const isJs = /\.m?js$/i.test(claudePath);
+    const file = isJs ? process.execPath : claudePath;
+    const args = isJs ? [claudePath, '--version'] : ['--version'];
+    const { stdout } = await execFileAsync(file, args, {
       timeout: 5000,
       env: { ...process.env, PATH: getExpandedPath() },
       shell: needsShell(claudePath),
