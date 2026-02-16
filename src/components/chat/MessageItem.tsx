@@ -259,22 +259,6 @@ export function MessageItem({ message, blockNumber }: MessageItemProps) {
           <FileAttachmentDisplay files={files} />
         )}
 
-        {/* Tool calls for assistant messages — compact collapsible group */}
-        {!isUser && pairedTools.length > 0 && (
-          <ToolActionsGroup
-            tools={pairedTools.map((tool, i) => ({
-              id: `hist-${i}`,
-              name: tool.name,
-              input: tool.input,
-              result: tool.result,
-              isError: tool.isError,
-            }))}
-          />
-        )}
-
-        {/* Inline figures from bash tool results — visible even when tools are collapsed */}
-        {!isUser && <InlineFigures tools={pairedTools} />}
-
         {/* Text content */}
         {displayText && (
           isUser ? (
@@ -317,6 +301,22 @@ export function MessageItem({ message, blockNumber }: MessageItemProps) {
             <MessageResponse>{displayText}</MessageResponse>
           )
         )}
+
+        {/* Tool calls for assistant messages — compact collapsible group, below text */}
+        {!isUser && pairedTools.length > 0 && (
+          <ToolActionsGroup
+            tools={pairedTools.map((tool, i) => ({
+              id: `hist-${i}`,
+              name: tool.name,
+              input: tool.input,
+              result: tool.result,
+              isError: tool.isError,
+            }))}
+          />
+        )}
+
+        {/* Inline figures from bash tool results — visible even when tools are collapsed */}
+        {!isUser && <InlineFigures tools={pairedTools} />}
       </MessageContent>
 
       {/* Footer with copy, timestamp and token usage */}

@@ -167,7 +167,12 @@ export function StreamingMessage({
   return (
     <AIMessage from="assistant">
       <MessageContent>
-        {/* Tool calls — compact collapsible group */}
+        {/* Streaming text content rendered via Streamdown */}
+        {content && (
+          <MessageResponse>{content}</MessageResponse>
+        )}
+
+        {/* Tool calls — compact collapsible group, below text */}
         {toolUses.length > 0 && (
           <ToolActionsGroup
             tools={toolUses.map((tool) => {
@@ -250,11 +255,6 @@ export function StreamingMessage({
               <p className="text-xs text-red-600 dark:text-red-400">Denied</p>
             </ConfirmationRejected>
           </Confirmation>
-        )}
-
-        {/* Streaming text content rendered via Streamdown */}
-        {content && (
-          <MessageResponse>{content}</MessageResponse>
         )}
 
         {/* Loading indicator when no content yet */}
