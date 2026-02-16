@@ -69,6 +69,15 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
 
   // Ref to keep accumulated streaming content in sync regardless of React batching
   const accumulatedRef = useRef('');
+  // RAF-based throttle: only flush streaming content to React state once per animation frame (~60fps)
+  const rafIdRef = useRef<number>(0);
+  const flushStreamingContent = useCallback(() => {
+    if (rafIdRef.current) return; // already scheduled
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = 0;
+      setStreamingContent(accumulatedRef.current);
+    });
+  }, []);
   // Ref for sendMessage to allow self-referencing in timeout auto-retry without circular deps
   const sendMessageRef = useRef<(content: string, files?: FileAttachment[]) => Promise<void>>(undefined);
 
@@ -222,7 +231,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
                 case 'text': {
                   accumulated += event.data;
                   accumulatedRef.current = accumulated;
-                  setStreamingContent(accumulated);
+                  flushStreamingContent();
                   break;
                 }
 
@@ -384,6 +393,10 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
               setMessages((prev) => [...prev, partialMessage]);
             }
             // Clean up before auto-retry
+            if (rafIdRef.current) {
+              cancelAnimationFrame(rafIdRef.current);
+              rafIdRef.current = 0;
+            }
             toolTimeoutRef.current = null;
             setIsStreaming(false);
             setStreamingSessionId('');
@@ -430,6 +443,11 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
           setMessages((prev) => [...prev, errorMessage]);
         }
       } finally {
+        // Cancel any pending RAF to avoid stale flush after cleanup
+        if (rafIdRef.current) {
+          cancelAnimationFrame(rafIdRef.current);
+          rafIdRef.current = 0;
+        }
         toolTimeoutRef.current = null;
         setIsStreaming(false);
         setStreamingSessionId('');
@@ -447,7 +465,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
         window.dispatchEvent(new CustomEvent('refresh-file-tree'));
       }
     },
-    [sessionId, isStreaming, setStreamingSessionId, setPendingApprovalSessionId, mode, currentModel]
+    [sessionId, isStreaming, setStreamingSessionId, setPendingApprovalSessionId, mode, currentModel, flushStreamingContent]
   );
 
   // Keep sendMessageRef in sync so timeout auto-retry can call it
