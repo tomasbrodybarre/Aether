@@ -64,6 +64,7 @@ interface MessageInputProps {
   onWorkingDirectoryChange?: (dir: string) => void;
   mode?: string;
   onModeChange?: (mode: string) => void;
+  messages?: Array<{ role: string; content: string }>;
 }
 
 interface PopoverItem {
@@ -342,6 +343,7 @@ export function MessageInput({
   onWorkingDirectoryChange,
   mode = 'code',
   onModeChange,
+  messages: sessionMessages,
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -362,6 +364,12 @@ export function MessageInput({
   const [activeProviderBaseUrl, setActiveProviderBaseUrl] = useState<string | null>(null);
   const [activeProviderName, setActiveProviderName] = useState<string | null>(null);
 
+  // Prompt history state (arrow-up/down to recall previous prompts)
+  const [promptHistory, setPromptHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1); // -1 = not browsing
+  const [savedInput, setSavedInput] = useState('');
+  const historyNavigatingRef = useRef(false);
+
   // Fetch active provider to adapt model labels
   useEffect(() => {
     fetch('/api/providers')
@@ -378,6 +386,17 @@ export function MessageInput({
       })
       .catch(() => {});
   }, []);
+
+  // Seed prompt history from existing session messages
+  useEffect(() => {
+    if (sessionMessages && sessionMessages.length > 0) {
+      const userPrompts = sessionMessages
+        .filter(m => m.role === 'user')
+        .map(m => m.content.trim())
+        .filter(Boolean);
+      setPromptHistory(userPrompts);
+    }
+  }, [sessionMessages]);
 
   // Compute model options based on active provider
   const MODEL_OPTIONS = DEFAULT_MODEL_OPTIONS.map((opt) => {
@@ -501,6 +520,12 @@ export function MessageInput({
   const handleInputChange = useCallback(async (val: string) => {
     setInputValue(val);
 
+    // Exit history browsing if user types (but not when arrow-key handler sets the value)
+    if (historyIndex !== -1 && !historyNavigatingRef.current) {
+      setHistoryIndex(-1);
+      setSavedInput('');
+    }
+
     const textarea = textareaRef.current;
     if (!textarea) return;
 
@@ -536,7 +561,7 @@ export function MessageInput({
     if (popoverMode) {
       closePopover();
     }
-  }, [fetchFiles, fetchSkills, popoverMode, closePopover]);
+  }, [fetchFiles, fetchSkills, popoverMode, closePopover, historyIndex]);
 
   const handleSubmit = useCallback(async (msg: { text: string; files: Array<{ type: string; url: string; filename?: string; mediaType?: string }> }, e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -600,6 +625,12 @@ export function MessageInput({
         : expandedPrompt || badge.command;
 
       const files = await convertFiles();
+      // Push to prompt history
+      if (finalPrompt && (promptHistory.length === 0 || promptHistory[promptHistory.length - 1] !== finalPrompt)) {
+        setPromptHistory(prev => [...prev, finalPrompt]);
+      }
+      setHistoryIndex(-1);
+      setSavedInput('');
       setBadge(null);
       setInputValue('');
       onSend(finalPrompt, files.length > 0 ? files : undefined);
@@ -645,9 +676,16 @@ export function MessageInput({
       }
     }
 
-    onSend(content || 'Please review the attached file(s).', hasFiles ? files : undefined);
+    const textToSend = content || 'Please review the attached file(s).';
+    // Push to prompt history
+    if (content && (promptHistory.length === 0 || promptHistory[promptHistory.length - 1] !== content)) {
+      setPromptHistory(prev => [...prev, content]);
+    }
+    setHistoryIndex(-1);
+    setSavedInput('');
+    onSend(textToSend, hasFiles ? files : undefined);
     setInputValue('');
-  }, [inputValue, onSend, onCommand, disabled, isStreaming, closePopover, badge]);
+  }, [inputValue, onSend, onCommand, disabled, isStreaming, closePopover, badge, promptHistory]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -690,8 +728,42 @@ export function MessageInput({
         removeBadge();
         return;
       }
+
+      // Prompt history navigation (only when popover is closed and input is empty)
+      if (e.key === 'ArrowUp' && !popoverMode && promptHistory.length > 0 && inputValue.trim() === '') {
+        e.preventDefault();
+        historyNavigatingRef.current = true;
+        if (historyIndex === -1) {
+          setSavedInput(inputValue);
+          const newIndex = promptHistory.length - 1;
+          setHistoryIndex(newIndex);
+          setInputValue(promptHistory[newIndex]);
+        } else if (historyIndex > 0) {
+          const newIndex = historyIndex - 1;
+          setHistoryIndex(newIndex);
+          setInputValue(promptHistory[newIndex]);
+        }
+        requestAnimationFrame(() => { historyNavigatingRef.current = false; });
+        return;
+      }
+
+      if (e.key === 'ArrowDown' && !popoverMode && historyIndex !== -1) {
+        e.preventDefault();
+        historyNavigatingRef.current = true;
+        if (historyIndex < promptHistory.length - 1) {
+          const newIndex = historyIndex + 1;
+          setHistoryIndex(newIndex);
+          setInputValue(promptHistory[newIndex]);
+        } else {
+          setHistoryIndex(-1);
+          setInputValue(savedInput);
+          setSavedInput('');
+        }
+        requestAnimationFrame(() => { historyNavigatingRef.current = false; });
+        return;
+      }
     },
-    [popoverMode, popoverItems, popoverFilter, selectedIndex, insertItem, closePopover, badge, inputValue, removeBadge]
+    [popoverMode, popoverItems, popoverFilter, selectedIndex, insertItem, closePopover, badge, inputValue, removeBadge, promptHistory, historyIndex, savedInput]
   );
 
   // Click outside to close popover
@@ -903,15 +975,22 @@ export function MessageInput({
             )}
             {/* File attachment capsules */}
             <FileAttachmentsCapsules />
-            <PromptInputTextarea
-              ref={textareaRef}
-              placeholder={badge ? "Add details (optional), then press Enter..." : "Message Claude..."}
-              value={inputValue}
-              onChange={(e) => handleInputChange(e.currentTarget.value)}
-              onKeyDown={handleKeyDown}
-              disabled={disabled}
-              className="min-h-10"
-            />
+            <div className="relative">
+              <PromptInputTextarea
+                ref={textareaRef}
+                placeholder={badge ? "Add details (optional), then press Enter..." : "Message Claude..."}
+                value={inputValue}
+                onChange={(e) => handleInputChange(e.currentTarget.value)}
+                onKeyDown={handleKeyDown}
+                disabled={disabled}
+                className="min-h-10"
+              />
+              {historyIndex !== -1 && (
+                <div className="absolute top-2 right-3 text-[0.625rem] text-muted-foreground/60 pointer-events-none">
+                  {historyIndex + 1}/{promptHistory.length}
+                </div>
+              )}
+            </div>
             <PromptInputFooter>
               <PromptInputTools>
                 {/* Attach file button */}

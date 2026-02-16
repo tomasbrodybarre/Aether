@@ -555,6 +555,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
         onWorkingDirectoryChange={handleWorkingDirectoryChange}
         mode={mode}
         onModeChange={handleModeChange}
+        messages={messages}
       />
     </div>
   );

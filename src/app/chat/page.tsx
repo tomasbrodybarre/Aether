@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Message, SSEEvent, SessionResponse, TokenUsage, PermissionRequestEvent } from '@/types';
 import { MessageList } from '@/components/chat/MessageList';
@@ -34,6 +34,26 @@ export default function NewChatPage() {
   const [permissionResolved, setPermissionResolved] = useState<'allow' | 'deny' | null>(null);
   const [streamingToolOutput, setStreamingToolOutput] = useState('');
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Pre-fill working directory from app settings
+  useEffect(() => {
+    async function loadDefaultDir() {
+      try {
+        const res = await fetch('/api/settings/app');
+        if (res.ok) {
+          const data = await res.json();
+          const defaultDir = data.settings?.default_working_directory;
+          if (defaultDir) {
+            setWorkingDir(defaultDir);
+            setWorkingDirectory(defaultDir);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+    loadDefaultDir();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleWorkingDirectoryChange = useCallback((dir: string) => {
     setWorkingDir(dir);

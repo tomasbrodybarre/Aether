@@ -26,6 +26,7 @@ import {
   Loading02Icon,
 } from "@hugeicons/core-free-icons";
 import { ProviderManager } from "@/components/settings/ProviderManager";
+import { FolderPicker } from "@/components/chat/FolderPicker";
 
 interface SettingsData {
   [key: string]: unknown;
@@ -84,6 +85,12 @@ function SettingsPageInner() {
   const [fontSize, setFontSize] = useState(100);
   const [fontSizeSaving, setFontSizeSaving] = useState(false);
 
+  // Default working directory state
+  const [defaultWorkingDir, setDefaultWorkingDir] = useState('');
+  const [defaultWorkingDirSaving, setDefaultWorkingDirSaving] = useState(false);
+  const [defaultWorkingDirSaved, setDefaultWorkingDirSaved] = useState(false);
+  const [showDirPicker, setShowDirPicker] = useState(false);
+
   const fetchSettings = useCallback(async () => {
     try {
       const res = await fetch("/api/settings");
@@ -113,6 +120,9 @@ function SettingsPageInner() {
         setSkipPermissions(appSettings.dangerously_skip_permissions === "true");
         if (appSettings.font_size) {
           setFontSize(parseInt(appSettings.font_size, 10) || 100);
+        }
+        if (appSettings.default_working_directory) {
+          setDefaultWorkingDir(appSettings.default_working_directory);
         }
       }
     } catch {
@@ -243,6 +253,26 @@ function SettingsPageInner() {
     }
   };
 
+  const saveDefaultWorkingDir = async (dir: string) => {
+    setDefaultWorkingDirSaving(true);
+    try {
+      const res = await fetch("/api/settings/app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { default_working_directory: dir } }),
+      });
+      if (res.ok) {
+        setDefaultWorkingDir(dir);
+        setDefaultWorkingDirSaved(true);
+        setTimeout(() => setDefaultWorkingDirSaved(false), 2000);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setDefaultWorkingDirSaving(false);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border/50 px-6 pt-4 pb-4">
@@ -306,6 +336,47 @@ function SettingsPageInner() {
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Default Working Directory */}
+          <div className="rounded-lg border border-border/50 p-4 transition-shadow hover:shadow-sm">
+            <h2 className="text-sm font-medium">Default Working Directory</h2>
+            <p className="mb-3 text-xs text-muted-foreground">
+              New sessions will start in this directory by default.
+            </p>
+            <div className="flex items-center gap-2">
+              <Input
+                value={defaultWorkingDir}
+                onChange={(e) => setDefaultWorkingDir(e.target.value)}
+                placeholder="e.g., C:\Users\tomas\projects"
+                className="flex-1 font-mono text-xs"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowDirPicker(true)}
+              >
+                Browse
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => saveDefaultWorkingDir(defaultWorkingDir)}
+                disabled={defaultWorkingDirSaving}
+              >
+                Save
+              </Button>
+              {defaultWorkingDirSaved && (
+                <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
+              )}
+            </div>
+            {defaultWorkingDir && (
+              <button
+                onClick={() => saveDefaultWorkingDir('')}
+                className="mt-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Clear default
+              </button>
+            )}
           </div>
 
           {/* Dangerous Settings */}
@@ -519,6 +590,17 @@ function SettingsPageInner() {
           )}
         </div>
       </div>
+
+      {/* Folder picker for default working directory */}
+      <FolderPicker
+        open={showDirPicker}
+        onOpenChange={setShowDirPicker}
+        onSelect={(dir) => {
+          setDefaultWorkingDir(dir);
+          saveDefaultWorkingDir(dir);
+        }}
+        initialPath={defaultWorkingDir || undefined}
+      />
 
       {/* Confirmation dialog */}
       <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>

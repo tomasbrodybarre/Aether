@@ -229,7 +229,7 @@ export function createSession(
   const db = getDb();
   const id = crypto.randomBytes(16).toString('hex');
   const now = new Date().toISOString().replace('T', ' ').split('.')[0];
-  const wd = workingDirectory || process.cwd();
+  const wd = workingDirectory || getSetting('default_working_directory') || process.cwd();
   const projectName = path.basename(wd);
 
   db.prepare(

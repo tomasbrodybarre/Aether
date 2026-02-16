@@ -20,6 +20,7 @@ import { isImageFile } from '@/types';
 import { registerPendingPermission } from './permission-registry';
 import { getSetting, getActiveProvider } from './db';
 import { findClaudeBinary, findGitBash, getExpandedPath, getClaudeAuthInfo } from './platform';
+import { readClaudeMdFiles } from './claude-md';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -190,6 +191,9 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           sdkEnv.MPLBACKEND = 'Agg';
         }
 
+        // Prevent "nested session" detection — Aether is a wrapper, not a nested session
+        delete sdkEnv.CLAUDECODE;
+
         // Ensure HOME/USERPROFILE are set so Claude Code can find ~/.claude/commands/
         if (!sdkEnv.HOME) sdkEnv.HOME = os.homedir();
         if (!sdkEnv.USERPROFILE) sdkEnv.USERPROFILE = os.homedir();
@@ -301,9 +305,14 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           '- Always import os at the top of scripts that save figures',
         ].join('\n');
 
-        const fullAppend = systemPrompt
-          ? `${scienceLabPreamble}\n\n${systemPrompt}`
-          : scienceLabPreamble;
+        // Read CLAUDE.md files from the working directory hierarchy
+        const claudeMdContent = readClaudeMdFiles(workingDirectory || process.cwd());
+
+        const fullAppend = [
+          claudeMdContent,
+          scienceLabPreamble,
+          systemPrompt,
+        ].filter(Boolean).join('\n\n');
 
         queryOptions.systemPrompt = {
           type: 'preset',
