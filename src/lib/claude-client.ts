@@ -299,19 +299,30 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           'You are NOT running in a raw CLI terminal. The user sees a rich web interface.',
           '',
           '## Aether capabilities (not available in raw CLI):',
-          '- **Inline image rendering**: Image file paths in tool output (Bash, Glob, Read, etc.) are detected and rendered inline with a resize slider. Supported: png, jpg, jpeg, gif, svg, webp, bmp, tiff.',
+          '- **Inline image rendering**: Image file paths in Bash tool output are auto-detected and rendered inline with a resize slider. You can also embed images directly in your response text using markdown image syntax (see below). Supported: png, jpg, jpeg, gif, svg, webp, bmp, tiff.',
           '- **Rich text rendering**: Markdown, LaTeX ($...$ and $$...$$), syntax-highlighted code, and GFM tables all render natively in the chat.',
           '- **Message queueing**: The user can queue a follow-up message while you are still streaming. They can also interrupt you (Escape or red Interrupt button) to force-send a message immediately.',
           '- **Labeled outputs**: Assistant messages are labeled Out[N] for easy reference.',
           '',
           '## How to render images inline:',
-          'For the image to appear, the **absolute file path** must appear in a tool result.',
+          'There are two ways to display images:',
+          '',
+          '### Method 1: Auto-detection from Bash output (for generated figures)',
+          'When a Bash tool prints an absolute file path ending in an image extension, Aether auto-detects it and renders the image below the tool block.',
           '- Python: save with `plt.savefig()` using ABSOLUTE paths, then `print(os.path.abspath("figure.png"))`',
           '- Bash: `echo "/absolute/path/to/figure.png"`',
           '- Do NOT call `plt.show()` — Aether renders saved figures inline automatically',
           '- Use `dpi=150, bbox_inches="tight"` for clean output',
           '- Use descriptive filenames (e.g. "correlation_matrix.png", "time_series.png")',
           '- Always `import os` at the top of scripts that save figures',
+          '',
+          '### Method 2: Markdown image syntax in your response (for embedding in text)',
+          'You can embed images directly in your response text using markdown image syntax. This lets you place images exactly where they make sense in your narrative.',
+          '- Syntax: `![description](/api/files/raw?path=ABSOLUTE_PATH&cwd=WORKING_DIR)`',
+          '- Example: `![Correlation matrix](/api/files/raw?path=C%3A%2Fproject%2Ffigures%2Fcorr.png&cwd=C%3A%2Fproject)`',
+          '- The path and cwd parameters must be URL-encoded (encodeURIComponent)',
+          '- Use this when you want to reference a figure inline with your explanation, or show multiple figures with commentary between them',
+          '- The image must already exist on disk (e.g. saved by a previous Bash tool call)',
         ].join('\n');
 
         // Read CLAUDE.md files from the working directory hierarchy,
@@ -360,10 +371,17 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           }
           if (toolName === 'Bash' && typeof input.command === 'string') {
             const cmd = input.command.trim();
-            // Allow read-only git operations on claude-memory only
+            // Allow read-only git operations on claude-memory (relative path)
             if (/^git\s+(-C\s+\S*claude-memory\S*\s+)?(pull|fetch|status|log|diff)\b/.test(cmd) &&
                 cmd.includes('claude-memory')) {
               return { behavior: 'allow' as const };
+            }
+            // Allow git pull/fetch/status on the shared memory and skills repos (absolute paths)
+            if (/^git\s+-C\s+/.test(cmd) && /\b(pull|fetch|status|log|diff)\b/.test(cmd)) {
+              const normalised = cmd.replace(/\\/g, '/').toLowerCase();
+              if (normalised.includes('c:/claude-hub/memory') || normalised.includes('c:/claude-hub/skills')) {
+                return { behavior: 'allow' as const };
+              }
             }
           }
 

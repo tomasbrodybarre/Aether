@@ -33,15 +33,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const [chatListOpen, setChatListOpenRaw] = useState(false);
 
-  // Panel width state with localStorage persistence
-  const [chatListWidth, setChatListWidth] = useState(() => {
-    if (typeof window === "undefined") return 240;
-    return parseInt(localStorage.getItem("codepilot_chatlist_width") || "240");
-  });
-  const [rightPanelWidth, setRightPanelWidth] = useState(() => {
-    if (typeof window === "undefined") return 288;
-    return parseInt(localStorage.getItem("codepilot_rightpanel_width") || "288");
-  });
+  // Panel width state with localStorage persistence (hydrate after mount to avoid SSR mismatch)
+  const [chatListWidth, setChatListWidth] = useState(240);
+  const [rightPanelWidth, setRightPanelWidth] = useState(288);
 
   const handleChatListResize = useCallback((delta: number) => {
     setChatListWidth((w) => Math.min(CHATLIST_MAX, Math.max(CHATLIST_MIN, w + delta)));
@@ -88,10 +82,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // --- Doc Preview state ---
   const [previewFile, setPreviewFileRaw] = useState<string | null>(null);
   const [previewViewMode, setPreviewViewMode] = useState<PreviewViewMode>("source");
-  const [docPreviewWidth, setDocPreviewWidth] = useState(() => {
-    if (typeof window === "undefined") return 480;
-    return parseInt(localStorage.getItem("codepilot_docpreview_width") || "480");
-  });
+  const [docPreviewWidth, setDocPreviewWidth] = useState(480);
+
+  // Hydrate persisted widths from localStorage after mount (avoids SSR mismatch)
+  useEffect(() => {
+    const cl = localStorage.getItem("codepilot_chatlist_width");
+    if (cl) setChatListWidth(parseInt(cl));
+    const rp = localStorage.getItem("codepilot_rightpanel_width");
+    if (rp) setRightPanelWidth(parseInt(rp));
+    const dp = localStorage.getItem("codepilot_docpreview_width");
+    if (dp) setDocPreviewWidth(parseInt(dp));
+  }, []);
 
   const setPreviewFile = useCallback((path: string | null) => {
     setPreviewFileRaw(path);

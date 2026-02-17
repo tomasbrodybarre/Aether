@@ -326,6 +326,74 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
+/** Resizable image component for markdown-embedded images (![alt](/api/files/raw?...)) */
+function ResizableImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
+  const { src, alt, ...rest } = props;
+  const [width, setWidth] = useState(100);
+  const [sliderValue, setSliderValue] = useState(100);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleError = useCallback(async () => {
+    if (!src) { setError('No image source provided'); return; }
+    try {
+      const res = await fetch(src as string, { method: 'HEAD' });
+      if (res.status === 403) setError('Access denied — file outside allowed directories');
+      else if (res.status === 404) setError('File not found on disk');
+      else setError(`Failed to load image (HTTP ${res.status})`);
+    } catch {
+      setError('Failed to load image');
+    }
+  }, [src]);
+
+  if (error) {
+    return (
+      <span className="block min-w-[120px] max-w-md my-2">
+        <span className="block rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+          <span className="block font-medium">Image failed to render</span>
+          {alt && <span className="block mt-0.5 text-muted-foreground">{alt}</span>}
+          <span className="block mt-1">{error}</span>
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <span style={{ width: `${width}%` }} className="block min-w-[120px] my-2">
+      <span className="block rounded-lg overflow-hidden border border-border/30 bg-muted/20">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt={alt || ''}
+          className="w-full object-contain"
+          onError={handleError}
+          {...rest}
+        />
+        <span className="px-2 py-1.5 flex items-center gap-2">
+          <input
+            type="range"
+            min={20}
+            max={100}
+            step={5}
+            value={sliderValue}
+            onChange={(e) => setSliderValue(parseInt(e.target.value, 10))}
+            onMouseUp={() => setWidth(sliderValue)}
+            onTouchEnd={() => setWidth(sliderValue)}
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 h-1 accent-primary cursor-pointer"
+            title={`${sliderValue}% width`}
+          />
+          <span className="text-[0.625rem] text-muted-foreground tabular-nums w-8 text-right shrink-0">
+            {sliderValue}%
+          </span>
+        </span>
+        {alt && <span className="block px-2 pb-1 text-xs text-muted-foreground truncate">{alt}</span>}
+      </span>
+    </span>
+  );
+}
+
+const streamdownComponents = { img: ResizableImage };
+
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
     <Streamdown
@@ -334,6 +402,7 @@ export const MessageResponse = memo(
         className
       )}
       plugins={streamdownPlugins}
+      components={streamdownComponents}
       {...props}
     />
   ),

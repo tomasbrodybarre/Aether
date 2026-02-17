@@ -37,12 +37,14 @@ function extractImagePaths(_command: string, output: string): string[] {
   return paths;
 }
 
-/** Tools whose output may contain image file paths. */
+/** Tools whose output may contain generated image file paths.
+ *  Only Bash-family tools produce images intentionally (e.g. matplotlib savefig + print).
+ *  Read/Glob/List are excluded — their output often mentions image filenames in docs or
+ *  directory listings, causing false-positive renders. */
 function canContainImagePaths(name: string): boolean {
   const lower = name.toLowerCase();
   return lower === 'bash' || lower === 'execute' || lower === 'run' || lower === 'shell'
-    || lower === 'execute_command' || lower === 'glob' || lower === 'read'
-    || lower === 'write' || lower === 'list' || lower === 'tool_result';
+    || lower === 'execute_command';
 }
 
 function isAbsolutePath(p: string): boolean {
