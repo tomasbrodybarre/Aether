@@ -1,9 +1,22 @@
 import { NextRequest } from 'next/server';
 import { streamClaude } from '@/lib/claude-client';
 import { addMessage, getSession, updateSessionTitle, updateSdkSessionId, getSetting } from '@/lib/db';
-import type { SendMessageRequest, SSEEvent, TokenUsage, MessageContentBlock, FileAttachment } from '@/types';
+import type { SendMessageRequest, SSEEvent, TokenUsage, MessageContentBlock, FileAttachment, MCPServerConfig } from '@/types';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+
+function readMcpServers(): Record<string, MCPServerConfig> {
+  try {
+    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
+    if (!fs.existsSync(settingsPath)) return {};
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+    return (settings.mcpServers || {}) as Record<string, MCPServerConfig>;
+  } catch (error) {
+    console.warn('[chat] Failed to load MCP servers:', error instanceof Error ? error.message : String(error));
+    return {};
+  }
+}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -92,6 +105,9 @@ export async function POST(request: NextRequest) {
         }))
       : undefined;
 
+    // Load MCP server configs from ~/.claude/settings.json (shared with CLI)
+    const mcpServers = readMcpServers();
+
     // Stream Claude response, using SDK session ID for resume if available
     const stream = streamClaude({
       prompt: content,
@@ -100,6 +116,7 @@ export async function POST(request: NextRequest) {
       model: effectiveModel,
       systemPrompt: systemPromptOverride || session.system_prompt || undefined,
       workingDirectory: session.working_directory || undefined,
+      mcpServers,
       abortController,
       permissionMode,
       files: fileAttachments,

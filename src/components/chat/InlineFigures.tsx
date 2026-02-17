@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { usePanel } from '@/hooks/usePanel';
 import { ImageLightbox } from './ImageLightbox';
 
@@ -67,9 +67,34 @@ function ResizableFigure({
 }) {
   const [width, setWidth] = useState(getDefaultFigureWidth);
   const [sliderValue, setSliderValue] = useState(getDefaultFigureWidth);
-  const [failed, setFailed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  if (failed) return null;
+  const handleImageError = useCallback(async () => {
+    try {
+      const res = await fetch(src, { method: 'HEAD' });
+      if (res.status === 403) {
+        setError('Access denied — file is outside the allowed directories (home or working directory)');
+      } else if (res.status === 404) {
+        setError('File not found on disk');
+      } else {
+        setError(`Failed to load image (HTTP ${res.status})`);
+      }
+    } catch {
+      setError('Failed to load image');
+    }
+  }, [src]);
+
+  if (error) {
+    return (
+      <div className="min-w-[120px] max-w-md">
+        <div className="rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+          <div className="font-medium">Image failed to render</div>
+          <div className="mt-0.5 text-muted-foreground">{alt}</div>
+          <div className="mt-1">{error}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ width: `${width}%` }} className="min-w-[120px]">
@@ -84,7 +109,7 @@ function ResizableFigure({
             src={src}
             alt={alt}
             className="w-full object-contain"
-            onError={() => setFailed(true)}
+            onError={handleImageError}
           />
         </button>
         <div className="px-2 py-1.5 flex items-center gap-2">
