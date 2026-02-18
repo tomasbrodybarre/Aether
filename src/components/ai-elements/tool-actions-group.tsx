@@ -226,7 +226,7 @@ export function ToolActionsGroup({
   if (summaryParts.length === 0) summaryParts.push(`${tools.length} actions`);
 
   return (
-    <div className="w-[min(100%,48rem)]">
+    <div className="w-[min(100%,48rem)] mx-auto">
       {/* Header — minimal: chevron + count + gray summary */}
       <button
         type="button"

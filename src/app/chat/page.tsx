@@ -34,11 +34,12 @@ export default function NewChatPage() {
   const [permissionResolved, setPermissionResolved] = useState<'allow' | 'deny' | null>(null);
   const currentPermission = permissionQueue[0] ?? null;
   const [streamingToolOutput, setStreamingToolOutput] = useState('');
+  const [contentWidth, setContentWidth] = useState(100);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Pre-fill working directory from app settings
+  // Pre-fill working directory and content width from app settings
   useEffect(() => {
-    async function loadDefaultDir() {
+    async function loadAppSettings() {
       try {
         const res = await fetch('/api/settings/app');
         if (res.ok) {
@@ -48,12 +49,16 @@ export default function NewChatPage() {
             setWorkingDir(defaultDir);
             setWorkingDirectory(defaultDir);
           }
+          const w = parseInt(data.settings?.content_width, 10);
+          if (w >= 50 && w <= 100) {
+            setContentWidth(w);
+          }
         }
       } catch {
         // ignore
       }
     }
-    loadDefaultDir();
+    loadAppSettings();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleWorkingDirectoryChange = useCallback((dir: string) => {
@@ -380,6 +385,7 @@ export default function NewChatPage() {
         permissionQueueLength={permissionQueue.length}
         onPermissionResponse={handlePermissionResponse}
         permissionResolved={permissionResolved}
+        contentWidth={contentWidth}
       />
       <MessageInput
         onSend={sendFirstMessage}
@@ -393,6 +399,7 @@ export default function NewChatPage() {
         onWorkingDirectoryChange={handleWorkingDirectoryChange}
         mode={mode}
         onModeChange={setMode}
+        contentWidth={contentWidth}
       />
     </div>
   );

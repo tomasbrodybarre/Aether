@@ -68,6 +68,7 @@ interface MessageInputProps {
   mode?: string;
   onModeChange?: (mode: string) => void;
   messages?: Array<{ role: string; content: string }>;
+  contentWidth?: number;
 }
 
 interface PopoverItem {
@@ -364,6 +365,7 @@ export function MessageInput({
   mode = 'code',
   onModeChange,
   messages: sessionMessages,
+  contentWidth = 100,
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -870,7 +872,7 @@ export function MessageInput({
 
   return (
     <div className="bg-background/80 backdrop-blur-lg px-4 py-3">
-      <div className="mx-auto">
+      <div className="mx-auto" style={{ maxWidth: contentWidth >= 100 ? '1000px' : `${contentWidth}%` }}>
         <div className="relative">
           {/* Popover */}
           {popoverMode && filteredItems.length > 0 && (() => {

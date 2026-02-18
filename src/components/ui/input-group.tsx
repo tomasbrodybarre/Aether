@@ -8,11 +8,19 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 
-function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
+function InputGroup({ className, onClick, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="input-group"
       role="group"
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest("button")) {
+          onClick?.(e)
+          return
+        }
+        ;(e.currentTarget.querySelector("textarea") ?? e.currentTarget.querySelector("input"))?.focus()
+        onClick?.(e)
+      }}
       className={cn(
         "group/input-group border-input dark:bg-input/30 relative flex w-full items-center rounded-2xl border shadow-md transition-[color,box-shadow] outline-none",
         "h-9 min-w-0 has-[>textarea]:h-auto",
@@ -72,7 +80,8 @@ function InputGroupAddon({
         if ((e.target as HTMLElement).closest("button")) {
           return
         }
-        e.currentTarget.parentElement?.querySelector("input")?.focus()
+        const parent = e.currentTarget.parentElement
+        ;(parent?.querySelector("textarea") ?? parent?.querySelector("input"))?.focus()
       }}
       {...props}
     />

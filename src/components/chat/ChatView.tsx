@@ -24,10 +24,15 @@ interface ChatViewProps {
   initialMode?: string;
 }
 
+// Module-level cache for content width setting
+let cachedContentWidth: number | null = null;
+
 export function ChatView({ sessionId, initialMessages = [], modelName, initialMode }: ChatViewProps) {
   const { setStreamingSessionId, workingDirectory, setWorkingDirectory, setPendingApprovalSessionId } = usePanel();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [streamingContent, setStreamingContent] = useState('');
+  const [contentWidth, setContentWidth] = useState(cachedContentWidth ?? 100);
+  const contentWidthFetched = useRef(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [toolUses, setToolUses] = useState<ToolUseInfo[]>([]);
   const [toolResults, setToolResults] = useState<ToolResultInfo[]>([]);
@@ -79,6 +84,22 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
       setStreamingContent(accumulatedRef.current);
     });
   }, []);
+  // Fetch content width setting once
+  useEffect(() => {
+    if (contentWidthFetched.current || cachedContentWidth !== null) return;
+    contentWidthFetched.current = true;
+    fetch('/api/settings/app')
+      .then((r) => r.json())
+      .then((data) => {
+        const w = parseInt(data.settings?.content_width, 10);
+        if (w >= 50 && w <= 100) {
+          cachedContentWidth = w;
+          setContentWidth(w);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Ref for sendMessage to allow self-referencing in timeout auto-retry without circular deps
   const sendMessageRef = useRef<(content: string, files?: FileAttachment[]) => Promise<void>>(undefined);
 
@@ -622,6 +643,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
         onPermissionResponse={handlePermissionResponse}
         permissionResolved={permissionResolved}
         onForceStop={stopStreaming}
+        contentWidth={contentWidth}
       />
       <MessageInput
         onSend={sendMessage}
@@ -640,6 +662,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
         mode={mode}
         onModeChange={handleModeChange}
         messages={messages}
+        contentWidth={contentWidth}
       />
     </div>
   );

@@ -13,6 +13,7 @@ const ALLOWED_KEYS = [
   'font_size',
   'default_working_directory',
   'default_figure_width',
+  'content_width',
 ];
 
 export async function GET() {

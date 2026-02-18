@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { usePanel } from '@/hooks/usePanel';
 import { ImageLightbox } from './ImageLightbox';
 
@@ -51,14 +51,7 @@ function isAbsolutePath(p: string): boolean {
   return /^[A-Za-z]:[/\\]/.test(p) || p.startsWith('/');
 }
 
-// Module-level cache for default figure width
-let cachedDefaultWidth: number | null = null;
-
-function getDefaultFigureWidth(): number {
-  return cachedDefaultWidth ?? 100;
-}
-
-function ResizableFigure({
+function InlineFigure({
   src,
   alt,
   onClick,
@@ -67,8 +60,6 @@ function ResizableFigure({
   alt: string;
   onClick: () => void;
 }) {
-  const [width, setWidth] = useState(getDefaultFigureWidth);
-  const [sliderValue, setSliderValue] = useState(getDefaultFigureWidth);
   const [error, setError] = useState<string | null>(null);
 
   const handleImageError = useCallback(async () => {
@@ -99,41 +90,21 @@ function ResizableFigure({
   }
 
   return (
-    <div style={{ width: `${width}%` }} className="min-w-[120px]">
-      <div className="rounded-lg overflow-hidden border border-border/30 bg-muted/20">
-        <button
-          type="button"
-          onClick={onClick}
-          className="w-full cursor-pointer hover:opacity-80 transition"
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={src}
-            alt={alt}
-            className="w-full object-contain"
-            onError={handleImageError}
-          />
-        </button>
-        <div className="px-2 py-1.5 flex items-center gap-2">
-          <input
-            type="range"
-            min={20}
-            max={100}
-            step={5}
-            value={sliderValue}
-            onChange={(e) => setSliderValue(parseInt(e.target.value, 10))}
-            onMouseUp={() => setWidth(sliderValue)}
-            onTouchEnd={() => setWidth(sliderValue)}
-            onClick={(e) => e.stopPropagation()}
-            className="flex-1 h-1 accent-primary cursor-pointer"
-            title={`${sliderValue}% width`}
-          />
-          <span className="text-[10px] text-muted-foreground tabular-nums w-8 text-right shrink-0">
-            {sliderValue}%
-          </span>
-        </div>
-        <div className="px-2 pb-1 text-xs text-muted-foreground truncate">{alt}</div>
-      </div>
+    <div className="rounded-lg overflow-hidden border border-border/30 bg-muted/20">
+      <button
+        type="button"
+        onClick={onClick}
+        className="w-full cursor-pointer hover:opacity-80 transition"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt={alt}
+          className="w-full object-contain"
+          onError={handleImageError}
+        />
+      </button>
+      <div className="px-2 pb-1 text-xs text-muted-foreground truncate">{alt}</div>
     </div>
   );
 }
@@ -142,24 +113,6 @@ export function InlineFigures({ tools }: { tools: ToolPair[] }) {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const { workingDirectory } = usePanel();
-  const fetchedRef = useRef(false);
-  const [, setDefaultLoaded] = useState(false);
-
-  // Fetch default figure width once
-  useEffect(() => {
-    if (fetchedRef.current || cachedDefaultWidth !== null) return;
-    fetchedRef.current = true;
-    fetch('/api/settings/app')
-      .then((r) => r.json())
-      .then((data) => {
-        const w = parseInt(data.settings?.default_figure_width, 10);
-        if (w >= 20 && w <= 100) {
-          cachedDefaultWidth = w;
-          setDefaultLoaded(true); // trigger re-render so ResizableFigure picks up the new default
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   const allImagePaths: string[] = [];
   for (const tool of tools) {
@@ -189,7 +142,7 @@ export function InlineFigures({ tools }: { tools: ToolPair[] }) {
   return (
     <div className="my-2 space-y-2">
       {images.map((img, i) => (
-        <ResizableFigure
+        <InlineFigure
           key={img.src}
           src={img.src}
           alt={img.alt}

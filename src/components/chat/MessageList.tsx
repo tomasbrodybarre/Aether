@@ -36,6 +36,7 @@ interface MessageListProps {
   onPermissionResponse?: (decision: 'allow' | 'allow_session' | 'deny') => void;
   permissionResolved?: 'allow' | 'deny' | null;
   onForceStop?: () => void;
+  contentWidth?: number;
 }
 
 export function MessageList({
@@ -51,6 +52,7 @@ export function MessageList({
   onPermissionResponse,
   permissionResolved,
   onForceStop,
+  contentWidth = 100,
 }: MessageListProps) {
   if (messages.length === 0 && !isStreaming) {
     return (
@@ -66,7 +68,10 @@ export function MessageList({
 
   return (
     <Conversation>
-      <ConversationContent className="mx-auto max-w-3xl px-4 py-6 gap-6">
+      <ConversationContent
+        className="mx-auto px-4 py-6 gap-6 w-full"
+        style={{ maxWidth: contentWidth >= 100 ? '1000px' : `${contentWidth}%` }}
+      >
         {messages.map((message, index) => {
           // Compute block number for assistant messages (1-indexed, like Jupyter Out[N])
           const blockNumber = message.role === 'assistant'
