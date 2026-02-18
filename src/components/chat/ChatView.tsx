@@ -159,13 +159,15 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
 
     // After brief feedback, shift queue to show next permission (or clear)
     setTimeout(() => {
-      setPermissionQueue((q) => q.slice(1));
-      setPermissionResolved(null);
-      // Update approval indicator: clear if queue is now empty
       setPermissionQueue((q) => {
-        if (q.length === 0) setPendingApprovalSessionId('');
-        return q;
+        const next = q.slice(1);
+        // Clear approval indicator if queue is now empty (deferred to avoid setState-in-render)
+        if (next.length === 0) {
+          queueMicrotask(() => setPendingApprovalSessionId(''));
+        }
+        return next;
       });
+      setPermissionResolved(null);
     }, 600);
   }, [currentPermission, setPendingApprovalSessionId]);
 
