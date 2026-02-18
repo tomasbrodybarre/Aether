@@ -32,6 +32,7 @@ interface MessageListProps {
   streamingToolOutput?: string;
   statusText?: string;
   pendingPermission?: PermissionRequestEvent | null;
+  permissionQueueLength?: number;
   onPermissionResponse?: (decision: 'allow' | 'allow_session' | 'deny') => void;
   permissionResolved?: 'allow' | 'deny' | null;
   onForceStop?: () => void;
@@ -46,6 +47,7 @@ export function MessageList({
   streamingToolOutput,
   statusText,
   pendingPermission,
+  permissionQueueLength,
   onPermissionResponse,
   permissionResolved,
   onForceStop,
@@ -84,6 +86,7 @@ export function MessageList({
             streamingToolOutput={streamingToolOutput}
             statusText={statusText}
             pendingPermission={pendingPermission}
+            permissionQueueLength={permissionQueueLength}
             onPermissionResponse={onPermissionResponse}
             permissionResolved={permissionResolved}
             onForceStop={onForceStop}

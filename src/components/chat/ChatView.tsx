@@ -34,8 +34,9 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
   const [statusText, setStatusText] = useState<string | undefined>();
   const [mode, setMode] = useState(initialMode || 'code');
   const [currentModel, setCurrentModel] = useState(modelName || 'opus');
-  const [pendingPermission, setPendingPermission] = useState<PermissionRequestEvent | null>(null);
+  const [permissionQueue, setPermissionQueue] = useState<PermissionRequestEvent[]>([]);
   const [permissionResolved, setPermissionResolved] = useState<'allow' | 'deny' | null>(null);
+  const currentPermission = permissionQueue[0] ?? null;
   const [streamingToolOutput, setStreamingToolOutput] = useState('');
   const [queuedMessage, setQueuedMessage] = useState<{ content: string; files?: FileAttachment[] } | null>(null);
   const toolTimeoutRef = useRef<{ toolName: string; elapsedSeconds: number } | null>(null);
@@ -130,22 +131,21 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
   }, [isStreaming]);
 
   const handlePermissionResponse = useCallback(async (decision: 'allow' | 'allow_session' | 'deny') => {
-    if (!pendingPermission) return;
+    if (!currentPermission) return;
 
     const body: { permissionRequestId: string; decision: { behavior: 'allow'; updatedPermissions?: unknown[] } | { behavior: 'deny'; message?: string } } = {
-      permissionRequestId: pendingPermission.permissionRequestId,
+      permissionRequestId: currentPermission.permissionRequestId,
       decision: decision === 'deny'
         ? { behavior: 'deny', message: 'User denied permission' }
         : {
             behavior: 'allow',
-            ...(decision === 'allow_session' && pendingPermission.suggestions
-              ? { updatedPermissions: pendingPermission.suggestions }
+            ...(decision === 'allow_session' && currentPermission.suggestions
+              ? { updatedPermissions: currentPermission.suggestions }
               : {}),
           },
     };
 
     setPermissionResolved(decision === 'deny' ? 'deny' : 'allow');
-    setPendingApprovalSessionId('');
 
     try {
       await fetch('/api/chat/permission', {
@@ -157,12 +157,17 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
       // Best effort - the stream will handle timeout
     }
 
-    // Clear permission state after a short delay so user sees the feedback
+    // After brief feedback, shift queue to show next permission (or clear)
     setTimeout(() => {
-      setPendingPermission(null);
+      setPermissionQueue((q) => q.slice(1));
       setPermissionResolved(null);
-    }, 1000);
-  }, [pendingPermission, setPendingApprovalSessionId]);
+      // Update approval indicator: clear if queue is now empty
+      setPermissionQueue((q) => {
+        if (q.length === 0) setPendingApprovalSessionId('');
+        return q;
+      });
+    }, 600);
+  }, [currentPermission, setPendingApprovalSessionId]);
 
   const sendMessage = useCallback(
     async (content: string, files?: FileAttachment[]) => {
@@ -349,7 +354,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
                 case 'permission_request': {
                   try {
                     const permData: PermissionRequestEvent = JSON.parse(event.data);
-                    setPendingPermission(permData);
+                    setPermissionQueue((q) => [...q, permData]);
                     setPermissionResolved(null);
                     setPendingApprovalSessionId(sessionId);
                   } catch {
@@ -449,7 +454,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
             setToolResults([]);
             setStreamingToolOutput('');
             setStatusText(undefined);
-            setPendingPermission(null);
+            setPermissionQueue([]);
             setPermissionResolved(null);
             setPendingApprovalSessionId('');
             abortControllerRef.current = null;
@@ -500,7 +505,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
         setToolResults([]);
         setStreamingToolOutput('');
         setStatusText(undefined);
-        setPendingPermission(null);
+        setPermissionQueue([]);
         setPermissionResolved(null);
         setPendingApprovalSessionId('');
         abortControllerRef.current = null;
@@ -610,7 +615,8 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
         toolResults={toolResults}
         streamingToolOutput={streamingToolOutput}
         statusText={statusText}
-        pendingPermission={pendingPermission}
+        pendingPermission={currentPermission}
+        permissionQueueLength={permissionQueue.length}
         onPermissionResponse={handlePermissionResponse}
         permissionResolved={permissionResolved}
         onForceStop={stopStreaming}

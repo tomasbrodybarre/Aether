@@ -300,7 +300,7 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           '',
           '## Aether capabilities (not available in raw CLI):',
           '- **Inline image rendering**: Image file paths in Bash tool output are auto-detected and rendered inline with a resize slider. You can also embed images directly in your response text using markdown image syntax (see below). Supported: png, jpg, jpeg, gif, svg, webp, bmp, tiff.',
-          '- **Rich text rendering**: Markdown, LaTeX ($...$ and $$...$$), syntax-highlighted code, and GFM tables all render natively in the chat.',
+          '- **Rich text rendering**: Markdown, LaTeX ($...$ and $$...$$), syntax-highlighted code, and GFM tables all render natively in the chat. IMPORTANT: Single `$` is treated as a LaTeX delimiter. When writing currency amounts, always escape the dollar sign with a backslash (`\\$68,880` not `$68,880`) to prevent it from being parsed as math.',
           '- **Message queueing**: The user can queue a follow-up message while you are still streaming. They can also interrupt you (Escape or red Interrupt button) to force-send a message immediately.',
           '- **Labeled outputs**: Assistant messages are labeled Out[N] for easy reference.',
           '',
@@ -359,16 +359,14 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
 
         // Permission handler: sends SSE event and waits for user response
         queryOptions.canUseTool = async (toolName, input, opts) => {
-          // Auto-approve read-only operations on the claude-memory repo
-          const memoryDir = path.resolve(cwd, 'claude-memory');
-          const isMemoryPath = (p: string) => {
-            const resolved = path.resolve(cwd, p);
-            return resolved === memoryDir || resolved.startsWith(memoryDir + path.sep);
-          };
-
-          if (toolName === 'Read' && typeof input.file_path === 'string' && isMemoryPath(input.file_path)) {
+          // --- Auto-approve read-only tools ---
+          // These tools only read local filesystem state and are safe to run without user approval.
+          // WebFetch/WebSearch are intentionally excluded — external content could contain prompt injection.
+          if (toolName === 'Read' || toolName === 'Glob' || toolName === 'Grep') {
             return { behavior: 'allow' as const };
           }
+
+          // Auto-approve read-only git operations on known safe repos
           if (toolName === 'Bash' && typeof input.command === 'string') {
             const cmd = input.command.trim();
             // Allow read-only git operations on claude-memory (relative path)

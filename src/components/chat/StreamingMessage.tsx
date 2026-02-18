@@ -41,6 +41,7 @@ interface StreamingMessageProps {
   streamingToolOutput?: string;
   statusText?: string;
   pendingPermission?: PermissionRequestEvent | null;
+  permissionQueueLength?: number;
   onPermissionResponse?: (decision: 'allow' | 'allow_session' | 'deny') => void;
   permissionResolved?: 'allow' | 'deny' | null;
   onForceStop?: () => void;
@@ -112,6 +113,7 @@ export function StreamingMessage({
   streamingToolOutput,
   statusText,
   pendingPermission,
+  permissionQueueLength = 0,
   onPermissionResponse,
   permissionResolved,
   onForceStop,
@@ -209,6 +211,11 @@ export function StreamingMessage({
           >
             <ConfirmationTitle>
               <span className="font-medium">{pendingPermission?.toolName}</span>
+              {permissionQueueLength > 1 && (
+                <span className="ml-2 inline-flex items-center rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400">
+                  1/{permissionQueueLength}
+                </span>
+              )}
               {pendingPermission?.decisionReason && (
                 <span className="text-muted-foreground ml-2">
                   — {pendingPermission.decisionReason}

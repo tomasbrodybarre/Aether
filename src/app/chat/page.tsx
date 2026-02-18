@@ -30,8 +30,9 @@ export default function NewChatPage() {
   const [workingDir, setWorkingDir] = useState('');
   const [mode, setMode] = useState('code');
   const [currentModel, setCurrentModel] = useState('opus');
-  const [pendingPermission, setPendingPermission] = useState<PermissionRequestEvent | null>(null);
+  const [permissionQueue, setPermissionQueue] = useState<PermissionRequestEvent[]>([]);
   const [permissionResolved, setPermissionResolved] = useState<'allow' | 'deny' | null>(null);
+  const currentPermission = permissionQueue[0] ?? null;
   const [streamingToolOutput, setStreamingToolOutput] = useState('');
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -66,22 +67,21 @@ export default function NewChatPage() {
   }, []);
 
   const handlePermissionResponse = useCallback(async (decision: 'allow' | 'allow_session' | 'deny') => {
-    if (!pendingPermission) return;
+    if (!currentPermission) return;
 
     const body: { permissionRequestId: string; decision: { behavior: 'allow'; updatedPermissions?: unknown[] } | { behavior: 'deny'; message?: string } } = {
-      permissionRequestId: pendingPermission.permissionRequestId,
+      permissionRequestId: currentPermission.permissionRequestId,
       decision: decision === 'deny'
         ? { behavior: 'deny', message: 'User denied permission' }
         : {
             behavior: 'allow',
-            ...(decision === 'allow_session' && pendingPermission.suggestions
-              ? { updatedPermissions: pendingPermission.suggestions }
+            ...(decision === 'allow_session' && currentPermission.suggestions
+              ? { updatedPermissions: currentPermission.suggestions }
               : {}),
           },
     };
 
     setPermissionResolved(decision === 'deny' ? 'deny' : 'allow');
-    setPendingApprovalSessionId('');
 
     try {
       await fetch('/api/chat/permission', {
@@ -93,11 +93,17 @@ export default function NewChatPage() {
       // Best effort
     }
 
+    // After brief feedback, shift queue to show next permission (or clear)
     setTimeout(() => {
-      setPendingPermission(null);
+      setPermissionQueue((q) => q.slice(1));
       setPermissionResolved(null);
-    }, 1000);
-  }, [pendingPermission, setPendingApprovalSessionId]);
+      // Update approval indicator: clear if queue is now empty
+      setPermissionQueue((q) => {
+        if (q.length === 0) setPendingApprovalSessionId('');
+        return q;
+      });
+    }, 600);
+  }, [currentPermission, setPendingApprovalSessionId]);
 
   const sendFirstMessage = useCallback(
     async (content: string) => {
@@ -255,7 +261,7 @@ export default function NewChatPage() {
                 case 'permission_request': {
                   try {
                     const permData: PermissionRequestEvent = JSON.parse(event.data);
-                    setPendingPermission(permData);
+                    setPermissionQueue((q) => [...q, permData]);
                     setPermissionResolved(null);
                     setPendingApprovalSessionId(sessionId);
                   } catch {
@@ -317,7 +323,7 @@ export default function NewChatPage() {
         setToolResults([]);
         setStreamingToolOutput('');
         setStatusText(undefined);
-        setPendingPermission(null);
+        setPermissionQueue([]);
         setPermissionResolved(null);
         setPendingApprovalSessionId('');
         abortControllerRef.current = null;
@@ -370,7 +376,8 @@ export default function NewChatPage() {
         toolResults={toolResults}
         streamingToolOutput={streamingToolOutput}
         statusText={statusText}
-        pendingPermission={pendingPermission}
+        pendingPermission={currentPermission}
+        permissionQueueLength={permissionQueue.length}
         onPermissionResponse={handlePermissionResponse}
         permissionResolved={permissionResolved}
       />
