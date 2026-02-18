@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, use } from 'react';
+import { useEffect, useState, useCallback, useRef, use } from 'react';
 import type { Message, MessagesResponse, ChatSession } from '@/types';
 import { ChatView } from '@/components/chat/ChatView';
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -20,7 +20,42 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
   const [sessionTitle, setSessionTitle] = useState<string>('');
   const [sessionModel, setSessionModel] = useState<string>('');
   const [sessionMode, setSessionMode] = useState<string>('');
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editingTitleValue, setEditingTitleValue] = useState('');
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const { setWorkingDirectory, setSessionId, setSessionTitle: setPanelSessionTitle } = usePanel();
+
+  const saveTitle = useCallback(async (newTitle: string) => {
+    const trimmed = newTitle.trim();
+    if (!trimmed || trimmed === sessionTitle) {
+      setIsEditingTitle(false);
+      return;
+    }
+    setSessionTitle(trimmed);
+    setPanelSessionTitle(trimmed);
+    setIsEditingTitle(false);
+    try {
+      await fetch(`/api/chat/sessions/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: trimmed }),
+      });
+    } catch {
+      // Best effort
+    }
+  }, [id, sessionTitle, setPanelSessionTitle]);
+
+  const startEditingTitle = useCallback(() => {
+    setEditingTitleValue(sessionTitle);
+    setIsEditingTitle(true);
+  }, [sessionTitle]);
+
+  useEffect(() => {
+    if (isEditingTitle && titleInputRef.current) {
+      titleInputRef.current.focus();
+      titleInputRef.current.select();
+    }
+  }, [isEditingTitle]);
 
   // Load session info and set working directory
   useEffect(() => {
@@ -109,9 +144,27 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
       <div className="flex items-center px-4 py-2">
         <div className="flex-1 min-w-0" />
         {sessionTitle && (
-          <h2 className="text-sm font-medium text-foreground/80 truncate max-w-md">
-            {sessionTitle}
-          </h2>
+          isEditingTitle ? (
+            <input
+              ref={titleInputRef}
+              value={editingTitleValue}
+              onChange={(e) => setEditingTitleValue(e.target.value)}
+              onBlur={() => saveTitle(editingTitleValue)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveTitle(editingTitleValue);
+                if (e.key === 'Escape') setIsEditingTitle(false);
+              }}
+              className="text-sm font-medium text-foreground/80 max-w-md bg-transparent border-b border-foreground/30 outline-none text-center"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={startEditingTitle}
+              className="text-sm font-medium text-foreground/80 truncate max-w-md hover:text-foreground transition-colors cursor-text"
+            >
+              {sessionTitle}
+            </button>
+          )
         )}
         <div className="flex-1 min-w-0 flex justify-end">
           <ConnectionStatus />
