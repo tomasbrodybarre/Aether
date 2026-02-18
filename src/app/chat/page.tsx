@@ -61,6 +61,13 @@ export default function NewChatPage() {
     loadAppSettings();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Clear approval indicator when permission queue empties
+  useEffect(() => {
+    if (permissionQueue.length === 0) {
+      setPendingApprovalSessionId('');
+    }
+  }, [permissionQueue.length, setPendingApprovalSessionId]);
+
   const handleWorkingDirectoryChange = useCallback((dir: string) => {
     setWorkingDir(dir);
     setWorkingDirectory(dir);
@@ -102,13 +109,8 @@ export default function NewChatPage() {
     setTimeout(() => {
       setPermissionQueue((q) => q.slice(1));
       setPermissionResolved(null);
-      // Update approval indicator: clear if queue is now empty
-      setPermissionQueue((q) => {
-        if (q.length === 0) setPendingApprovalSessionId('');
-        return q;
-      });
     }, 600);
-  }, [currentPermission, setPendingApprovalSessionId]);
+  }, [currentPermission]);
 
   const sendFirstMessage = useCallback(
     async (content: string) => {
