@@ -359,11 +359,14 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
 
         // Permission handler: sends SSE event and waits for user response
         queryOptions.canUseTool = async (toolName, input, opts) => {
+          // Helper: SDK runtime Zod schema requires updatedInput (Record) even though .d.ts marks it optional
+          const allow = () => ({ behavior: 'allow' as const, updatedInput: input });
+
           // --- Auto-approve read-only tools ---
           // These tools only read local filesystem state and are safe to run without user approval.
           // WebFetch/WebSearch are intentionally excluded — external content could contain prompt injection.
           if (toolName === 'Read' || toolName === 'Glob' || toolName === 'Grep') {
-            return { behavior: 'allow' as const };
+            return allow();
           }
 
           // Auto-approve read-only git operations on known safe repos
@@ -372,13 +375,13 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
             // Allow read-only git operations on claude-memory (relative path)
             if (/^git\s+(-C\s+\S*claude-memory\S*\s+)?(pull|fetch|status|log|diff)\b/.test(cmd) &&
                 cmd.includes('claude-memory')) {
-              return { behavior: 'allow' as const };
+              return allow();
             }
             // Allow git pull/fetch/status on the shared memory and skills repos (absolute paths)
             if (/^git\s+-C\s+/.test(cmd) && /\b(pull|fetch|status|log|diff)\b/.test(cmd)) {
               const normalised = cmd.replace(/\\/g, '/').toLowerCase();
               if (normalised.includes('c:/claude-hub/memory') || normalised.includes('c:/claude-hub/skills')) {
-                return { behavior: 'allow' as const };
+                return allow();
               }
             }
           }
