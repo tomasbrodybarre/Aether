@@ -349,6 +349,7 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
             '### Memory file targets',
             `- \`${memoryRepoPath.replace(/\\/g, '/')}/environments/${envId}.md\` — machine/environment-specific quirks (shell behavior, paths, OS workarounds)`,
             `- \`${memoryRepoPath.replace(/\\/g, '/')}/projects/<name>.md\` — project-specific learnings (default for most observations)`,
+            `- \`${memoryRepoPath.replace(/\\/g, '/')}/projects/_general.md\` — null-project staging: observations not tied to any specific project`,
             `- \`${memoryRepoPath.replace(/\\/g, '/')}/me.md\` — user profile/communication preferences (rare, only for explicit user statements)`,
             `- \`${memoryRepoPath.replace(/\\/g, '/')}/workflows.md\` — cross-project workflow patterns (rare, only for explicitly stated general rules)`,
             '',
