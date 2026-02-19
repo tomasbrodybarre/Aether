@@ -14,6 +14,18 @@ const ALLOWED_KEYS = [
   'default_working_directory',
   'default_figure_width',
   'content_width',
+  // Memory system settings
+  'memory_enabled',
+  'memory_repo_path',
+  'memory_environment_id',
+  'memory_auto_approve',
+  'memory_trigger_explicit_rules',
+  'memory_trigger_corrections',
+  'memory_trigger_error_recovery',
+  'memory_trigger_project_status',
+  'memory_trigger_project_shift',
+  'memory_consolidation_threshold',
+  'memory_custom_rules',
 ];
 
 export async function GET() {

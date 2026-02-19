@@ -67,6 +67,7 @@ export interface Message {
   content: string; // JSON string of MessageContentBlock[] for structured content
   created_at: string;
   token_usage: string | null; // JSON string of TokenUsage
+  project_tag?: string | null; // Project tag for memory system routing
 }
 
 // Structured message content blocks (stored as JSON in messages.content)
@@ -310,6 +311,7 @@ export type SSEEventType =
   | 'result'             // final result with usage stats
   | 'error'              // error occurred
   | 'permission_request' // permission approval needed
+  | 'memory_observation' // memory system: observation detected, show toast
   | 'done';              // stream complete
 
 export interface SSEEvent {
@@ -326,6 +328,12 @@ export interface PermissionSuggestion {
   rules?: Array<{ toolName: string; ruleContent?: string }>;
   behavior?: string;
   destination?: string;
+}
+
+export interface MemoryObservationEvent {
+  file: string;
+  tool: string;
+  auto_approve: boolean;
 }
 
 export interface PermissionRequestEvent {

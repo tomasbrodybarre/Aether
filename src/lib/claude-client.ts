@@ -293,10 +293,21 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
 
         // Aether environment marker — tells Claude this is an Aether session and
         // what extra capabilities are available beyond raw CLI.
-        const aetherPreamble = [
+        const hostname = os.hostname();
+        const platform = os.platform();
+        const release = os.release();
+        const envId = getSetting('memory_environment_id') || `${hostname}-${platform}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+
+        const aetherPreambleLines = [
           '# Aether Environment',
           'This session is mediated by Aether, a web-based GUI wrapper around Claude Code.',
           'You are NOT running in a raw CLI terminal. The user sees a rich web interface.',
+          '',
+          `## Machine environment`,
+          `- Environment ID: ${envId}`,
+          `- Hostname: ${hostname}`,
+          `- OS: ${platform} ${release}`,
+          `- Shell: ${process.env.SHELL || process.env.COMSPEC || 'unknown'}`,
           '',
           '## Aether capabilities (not available in raw CLI):',
           '- **Inline image rendering**: You can embed images in your response text using markdown image syntax (see below). Supported: png, jpg, jpeg, gif, svg, webp, bmp, tiff.',
@@ -312,7 +323,86 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           '- The image must already exist on disk (e.g. saved by a previous Bash tool call)',
           '- Do NOT call `plt.show()` — save figures with `plt.savefig()` and then embed them',
           '- Use `dpi=150, bbox_inches="tight"` for clean output',
-        ].join('\n');
+        ];
+
+        // Memory system instructions (conditionally included based on settings)
+        const memoryEnabled = getSetting('memory_enabled') !== 'false'; // default on
+        const memoryRepoPath = getSetting('memory_repo_path') || '';
+
+        if (memoryEnabled && memoryRepoPath) {
+          const enabledTriggers: string[] = [];
+          if (getSetting('memory_trigger_explicit_rules') !== 'false') enabledTriggers.push('explicit_rules');
+          if (getSetting('memory_trigger_corrections') !== 'false') enabledTriggers.push('corrections');
+          if (getSetting('memory_trigger_error_recovery') !== 'false') enabledTriggers.push('error_recovery');
+          if (getSetting('memory_trigger_project_status') !== 'false') enabledTriggers.push('project_status');
+          if (getSetting('memory_trigger_project_shift') !== 'false') enabledTriggers.push('project_shift');
+
+          const customRules = getSetting('memory_custom_rules') || '';
+
+          aetherPreambleLines.push(
+            '',
+            '## Memory System',
+            `Aether has an automatic memory system. The memory repository is at: \`${memoryRepoPath.replace(/\\/g, '/')}\``,
+            'You detect learnable moments during the conversation and write observations to the appropriate memory file using the Edit tool (append a concise bullet point).',
+            'Aether intercepts writes to the memory repo and shows them to the user as a toast notification for approval. Git commits are auto-approved for the memory repo.',
+            '',
+            '### Memory file targets',
+            `- \`${memoryRepoPath.replace(/\\/g, '/')}/environments/${envId}.md\` — machine/environment-specific quirks (shell behavior, paths, OS workarounds)`,
+            `- \`${memoryRepoPath.replace(/\\/g, '/')}/projects/<name>.md\` — project-specific learnings (default for most observations)`,
+            `- \`${memoryRepoPath.replace(/\\/g, '/')}/me.md\` — user profile/communication preferences (rare, only for explicit user statements)`,
+            `- \`${memoryRepoPath.replace(/\\/g, '/')}/workflows.md\` — cross-project workflow patterns (rare, only for explicitly stated general rules)`,
+            '',
+            '### Triggers (detect these and write observations):',
+          );
+
+          if (enabledTriggers.includes('explicit_rules')) {
+            aetherPreambleLines.push('- **Explicit rule**: User states "always do X" or "never do Y" — emit immediately');
+          }
+          if (enabledTriggers.includes('corrections')) {
+            aetherPreambleLines.push('- **User correction**: User corrects your output (factual, stylistic, or procedural) — emit the correction as a learning');
+          }
+          if (enabledTriggers.includes('error_recovery')) {
+            aetherPreambleLines.push(`- **Error→recovery cycle**: A tool call fails, you retry with a modified approach, and it succeeds. If the fix is environment-specific (path, shell, OS), emit to \`environments/${envId}.md\``);
+          }
+          if (enabledTriggers.includes('project_status')) {
+            aetherPreambleLines.push('- **Project status change**: Project direction, status, or key decision changes — emit to the project file');
+          }
+          if (enabledTriggers.includes('project_shift')) {
+            aetherPreambleLines.push('- **Turn-project shift**: When conversation topic transitions between projects (or from project to general), silently scan the completed block of turns for higher-order lessons and emit any observations before moving on');
+          }
+
+          aetherPreambleLines.push(
+            '',
+            '### Per-turn project tagging',
+            'As you work, mentally track which project each conversation turn relates to. This helps route observations to the correct project file.',
+            '',
+            '### Important',
+            '- Keep observations concise — append a single bullet point to the relevant file',
+            '- Do NOT write noise — only genuinely learnable moments',
+            '- The memory system runs silently. Do not mention memory writes to the user unless asked.',
+            `- After writing observations, commit with: \`git -C ${memoryRepoPath.replace(/\\/g, '/')} add -A && git -C ${memoryRepoPath.replace(/\\/g, '/')} commit -m "auto: <brief description>"\``,
+            '- Do NOT push — Aether handles push timing.',
+          );
+
+          const consolidationThreshold = parseInt(getSetting('memory_consolidation_threshold') || '15', 10);
+          aetherPreambleLines.push(
+            '',
+            '### Consolidation',
+            `When a project file accumulates ${consolidationThreshold}+ observations (bullet points), suggest a consolidation review to the user:`,
+            '"The [project] memory file has accumulated N observations. Would you like me to run a consolidation pass — reviewing observations, promoting generalizable patterns to me.md/workflows.md, and compacting the rest?"',
+            'Only suggest this if you notice the file is large when reading it. Do not actively count or poll.',
+          );
+
+          if (customRules) {
+            aetherPreambleLines.push(
+              '',
+              '### Custom memorization rules (from user settings):',
+              customRules,
+            );
+          }
+        }
+
+        const aetherPreamble = aetherPreambleLines.join('\n');
 
         // Read CLAUDE.md files from the working directory hierarchy,
         // execute aether:init directives (read: files, exec: commands)
@@ -351,6 +441,31 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
           // Helper: SDK runtime Zod schema requires updatedInput (Record) even though .d.ts marks it optional
           const allow = () => ({ behavior: 'allow' as const, updatedInput: input });
 
+          // --- Auto-approve and intercept memory repo writes ---
+          // Writes to the memory repo get special treatment: auto-approved (or routed
+          // through toast UI) and tagged with a memory_observation SSE event.
+          if (memoryEnabled && memoryRepoPath && (toolName === 'Edit' || toolName === 'Write')) {
+            const filePath = String((input as Record<string, unknown>).file_path || '');
+            const normalizedFilePath = filePath.replace(/\\/g, '/').toLowerCase();
+            const normalizedMemoryPath = memoryRepoPath.replace(/\\/g, '/').toLowerCase();
+            if (normalizedFilePath.startsWith(normalizedMemoryPath)) {
+              const memAutoApprove = getSetting('memory_auto_approve') === 'true';
+              // Emit memory_observation event so the client can show a toast
+              controller.enqueue(formatSSE({
+                type: 'memory_observation' as SSEEvent['type'],
+                data: JSON.stringify({
+                  file: filePath,
+                  tool: toolName,
+                  auto_approve: memAutoApprove,
+                }),
+              }));
+              if (memAutoApprove) {
+                return allow();
+              }
+              // Otherwise fall through to the normal permission flow (toast will show)
+            }
+          }
+
           // --- Auto-approve read-only tools ---
           // These tools only read local filesystem state and are safe to run without user approval.
           // WebFetch/WebSearch are intentionally excluded — external content could contain prompt injection.
@@ -358,7 +473,7 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
             return allow();
           }
 
-          // Auto-approve read-only git operations on known safe repos
+          // Auto-approve git operations on known safe repos
           if (toolName === 'Bash' && typeof input.command === 'string') {
             const cmd = input.command.trim();
             // Allow read-only git operations on claude-memory (relative path)
@@ -370,6 +485,14 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
             if (/^git\s+-C\s+/.test(cmd) && /\b(pull|fetch|status|log|diff)\b/.test(cmd)) {
               const normalised = cmd.replace(/\\/g, '/').toLowerCase();
               if (normalised.includes('c:/claude-hub/memory') || normalised.includes('c:/claude-hub/skills')) {
+                return allow();
+              }
+            }
+            // Auto-approve git add/commit on the memory repo (for memory system writes)
+            if (memoryEnabled && memoryRepoPath) {
+              const normalised = cmd.replace(/\\/g, '/').toLowerCase();
+              const normalizedMemPath = memoryRepoPath.replace(/\\/g, '/').toLowerCase();
+              if (normalised.includes(normalizedMemPath) && /\b(add|commit)\b/.test(cmd) && !(/\b(push|reset|checkout|rebase)\b/.test(cmd))) {
                 return allow();
               }
             }

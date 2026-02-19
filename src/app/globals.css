@@ -207,3 +207,15 @@ svg.hugeicons polyline,
 svg.hugeicons rect {
   stroke-width: 2;
 }
+
+/* Toast slide-in animation */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}

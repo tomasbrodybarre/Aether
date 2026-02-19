@@ -158,6 +158,11 @@ function migrateDb(db: Database.Database): void {
     db.exec("ALTER TABLE messages ADD COLUMN token_usage TEXT");
   }
 
+  if (!msgColNames.includes('project_tag')) {
+    db.exec("ALTER TABLE messages ADD COLUMN project_tag TEXT");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_messages_project_tag ON messages(project_tag)");
+  }
+
   // Ensure tasks table exists for databases created before this migration
   db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (

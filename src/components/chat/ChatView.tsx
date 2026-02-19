@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import type { Message, SSEEvent, TokenUsage, PermissionRequestEvent, FileAttachment } from '@/types';
+import type { Message, SSEEvent, TokenUsage, PermissionRequestEvent, MemoryObservationEvent, FileAttachment } from '@/types';
 import { MessageList } from './MessageList';
 import { MessageInput } from './MessageInput';
 import { usePanel } from '@/hooks/usePanel';
+import { useToast } from '@/components/ui/toast';
 
 interface ToolUseInfo {
   id: string;
@@ -29,6 +30,7 @@ let cachedContentWidth: number | null = null;
 
 export function ChatView({ sessionId, initialMessages = [], modelName, initialMode }: ChatViewProps) {
   const { setStreamingSessionId, workingDirectory, setWorkingDirectory, setPendingApprovalSessionId } = usePanel();
+  const { addToast } = useToast();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [streamingContent, setStreamingContent] = useState('');
   const [contentWidth, setContentWidth] = useState(cachedContentWidth ?? 100);
@@ -395,6 +397,37 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
                     };
                   } catch {
                     // skip malformed timeout data
+                  }
+                  break;
+                }
+
+                case 'memory_observation': {
+                  try {
+                    const memData: MemoryObservationEvent = JSON.parse(event.data);
+                    const fileName = memData.file.replace(/\\/g, '/').split('/').pop() || memData.file;
+                    if (memData.auto_approve) {
+                      addToast({
+                        type: 'memory',
+                        message: `Memory updated: ${fileName}`,
+                        detail: memData.file,
+                      });
+                    }
+                    // When auto_approve is false, the write goes through the normal
+                    // permission flow — the permission dialog serves as the review UI
+
+                    // Check if consolidation threshold is reached
+                    fetch('/api/memory').then(r => r.json()).then(memStatus => {
+                      if (memStatus.needs_consolidation && memStatus.consolidation_candidates?.length > 0) {
+                        const projects = memStatus.consolidation_candidates.join(', ');
+                        addToast({
+                          type: 'info',
+                          message: `Memory consolidation needed: ${projects}`,
+                          detail: `${memStatus.threshold}+ observations accumulated. Ask Claude to run a consolidation review.`,
+                        });
+                      }
+                    }).catch(() => { /* silent */ });
+                  } catch {
+                    // skip malformed memory_observation data
                   }
                   break;
                 }

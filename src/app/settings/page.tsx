@@ -95,6 +95,23 @@ function SettingsPageInner() {
   const [defaultWorkingDirSaved, setDefaultWorkingDirSaved] = useState(false);
   const [showDirPicker, setShowDirPicker] = useState(false);
 
+  // Memory system state
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
+  const [memoryRepoPath, setMemoryRepoPath] = useState('');
+  const [memoryEnvId, setMemoryEnvId] = useState('');
+  const [memoryAutoApprove, setMemoryAutoApprove] = useState(false);
+  const [memoryTriggers, setMemoryTriggers] = useState({
+    explicit_rules: true,
+    corrections: true,
+    error_recovery: true,
+    project_status: true,
+    project_shift: true,
+  });
+  const [memoryConsolidationThreshold, setMemoryConsolidationThreshold] = useState(15);
+  const [memoryCustomRules, setMemoryCustomRules] = useState('');
+  const [memorySaving, setMemorySaving] = useState(false);
+  const [memorySaved, setMemorySaved] = useState(false);
+
   const fetchSettings = useCallback(async () => {
     try {
       const res = await fetch("/api/settings");
@@ -131,6 +148,24 @@ function SettingsPageInner() {
         if (appSettings.content_width) {
           setContentWidth(parseInt(appSettings.content_width, 10) || 100);
         }
+        // Memory settings
+        if (appSettings.memory_enabled !== undefined) {
+          setMemoryEnabled(appSettings.memory_enabled !== 'false');
+        }
+        if (appSettings.memory_repo_path) setMemoryRepoPath(appSettings.memory_repo_path);
+        if (appSettings.memory_environment_id) setMemoryEnvId(appSettings.memory_environment_id);
+        if (appSettings.memory_auto_approve) setMemoryAutoApprove(appSettings.memory_auto_approve === 'true');
+        if (appSettings.memory_consolidation_threshold) {
+          setMemoryConsolidationThreshold(parseInt(appSettings.memory_consolidation_threshold, 10) || 15);
+        }
+        if (appSettings.memory_custom_rules) setMemoryCustomRules(appSettings.memory_custom_rules);
+        setMemoryTriggers({
+          explicit_rules: appSettings.memory_trigger_explicit_rules !== 'false',
+          corrections: appSettings.memory_trigger_corrections !== 'false',
+          error_recovery: appSettings.memory_trigger_error_recovery !== 'false',
+          project_status: appSettings.memory_trigger_project_status !== 'false',
+          project_shift: appSettings.memory_trigger_project_shift !== 'false',
+        });
       }
     } catch {
       // ignore
@@ -298,6 +333,39 @@ function SettingsPageInner() {
     }
   };
 
+  const saveMemorySettings = async () => {
+    setMemorySaving(true);
+    try {
+      const res = await fetch("/api/settings/app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settings: {
+            memory_enabled: memoryEnabled ? 'true' : 'false',
+            memory_repo_path: memoryRepoPath,
+            memory_environment_id: memoryEnvId,
+            memory_auto_approve: memoryAutoApprove ? 'true' : 'false',
+            memory_trigger_explicit_rules: memoryTriggers.explicit_rules ? 'true' : 'false',
+            memory_trigger_corrections: memoryTriggers.corrections ? 'true' : 'false',
+            memory_trigger_error_recovery: memoryTriggers.error_recovery ? 'true' : 'false',
+            memory_trigger_project_status: memoryTriggers.project_status ? 'true' : 'false',
+            memory_trigger_project_shift: memoryTriggers.project_shift ? 'true' : 'false',
+            memory_consolidation_threshold: String(memoryConsolidationThreshold),
+            memory_custom_rules: memoryCustomRules,
+          },
+        }),
+      });
+      if (res.ok) {
+        setMemorySaved(true);
+        setTimeout(() => setMemorySaved(false), 2000);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setMemorySaving(false);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border/50 px-6 pt-4 pb-4">
@@ -456,6 +524,144 @@ function SettingsPageInner() {
               >
                 Clear default
               </button>
+            )}
+          </div>
+
+          {/* Memory System */}
+          <div className="rounded-lg border border-border/50 p-4 transition-shadow hover:shadow-sm">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-sm font-medium">Memory</h2>
+              <Switch
+                checked={memoryEnabled}
+                onCheckedChange={setMemoryEnabled}
+              />
+            </div>
+            <p className="mb-4 text-xs text-muted-foreground">
+              Automatic learning — Aether gets progressively better at your style and workflows.
+            </p>
+
+            {memoryEnabled && (
+              <div className="space-y-4">
+                {/* Memory repo path */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Memory Repository Path</Label>
+                  <Input
+                    value={memoryRepoPath}
+                    onChange={(e) => setMemoryRepoPath(e.target.value)}
+                    placeholder="e.g., C:\claude-hub\memory"
+                    className="font-mono text-xs"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Git repo where memory files are stored. Synced across machines.
+                  </p>
+                </div>
+
+                {/* Environment ID */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Environment ID</Label>
+                  <Input
+                    value={memoryEnvId}
+                    onChange={(e) => setMemoryEnvId(e.target.value)}
+                    placeholder="auto-detected from hostname"
+                    className="font-mono text-xs"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Identifies this machine. Auto-detected if empty. Used for environment-specific memory files.
+                  </p>
+                </div>
+
+                {/* Auto-approve */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-xs">Auto-approve memory writes</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Skip review — writes commit immediately. When off, a toast shows for approval.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={memoryAutoApprove}
+                    onCheckedChange={setMemoryAutoApprove}
+                  />
+                </div>
+
+                <hr className="border-border/30" />
+
+                {/* Trigger toggles */}
+                <div className="space-y-2">
+                  <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Triggers</h3>
+                  {([
+                    ['explicit_rules', 'Explicit rules', 'User says "always/never do X"'],
+                    ['corrections', 'Corrections', 'User corrects Claude\'s output'],
+                    ['error_recovery', 'Error recovery', 'Tool fails, retry with fix succeeds'],
+                    ['project_status', 'Project status', 'Project direction or status changes'],
+                    ['project_shift', 'Topic shift', 'Scan for lessons when conversation topic changes'],
+                  ] as const).map(([key, label, desc]) => (
+                    <div key={key} className="flex items-center justify-between py-1">
+                      <div>
+                        <span className="text-xs">{label}</span>
+                        <p className="text-xs text-muted-foreground">{desc}</p>
+                      </div>
+                      <Switch
+                        checked={memoryTriggers[key]}
+                        onCheckedChange={(checked) =>
+                          setMemoryTriggers((prev) => ({ ...prev, [key]: checked }))
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                <hr className="border-border/30" />
+
+                {/* Consolidation threshold */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Consolidation Threshold</Label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min={5}
+                      max={50}
+                      step={5}
+                      value={memoryConsolidationThreshold}
+                      onChange={(e) => setMemoryConsolidationThreshold(parseInt(e.target.value, 10))}
+                      className="flex-1 accent-primary"
+                    />
+                    <span className="text-xs font-medium w-8 text-right">{memoryConsolidationThreshold}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Observations per project file before triggering a consolidation review.
+                  </p>
+                </div>
+
+                {/* Custom rules */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Custom Memorization Rules</Label>
+                  <Textarea
+                    value={memoryCustomRules}
+                    onChange={(e) => setMemoryCustomRules(e.target.value)}
+                    placeholder={'e.g., "Always log which Python packages I install"\n"Never memorize anything about personal email"'}
+                    className="font-mono text-xs"
+                    rows={3}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Freeform instructions injected into the system prompt. One rule per line.
+                  </p>
+                </div>
+
+                {/* Save button */}
+                <div className="flex items-center gap-3 pt-1">
+                  <Button
+                    size="sm"
+                    onClick={saveMemorySettings}
+                    disabled={memorySaving}
+                  >
+                    {memorySaving ? "Saving..." : "Save Memory Settings"}
+                  </Button>
+                  {memorySaved && (
+                    <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
+                  )}
+                </div>
+              </div>
             )}
           </div>
 

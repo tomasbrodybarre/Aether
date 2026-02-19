@@ -161,8 +161,8 @@ async function collectStreamResponse(stream: ReadableStream<string>, sessionId: 
         if (line.startsWith('data: ')) {
           try {
             const event: SSEEvent = JSON.parse(line.slice(6));
-            if (event.type === 'permission_request' || event.type === 'tool_output') {
-              // Skip permission_request and tool_output events - not saved as message content
+            if (event.type === 'permission_request' || event.type === 'tool_output' || event.type === 'memory_observation') {
+              // Skip permission_request, tool_output, and memory_observation events - not saved as message content
             } else if (event.type === 'text') {
               currentText += event.data;
             } else if (event.type === 'tool_use') {
