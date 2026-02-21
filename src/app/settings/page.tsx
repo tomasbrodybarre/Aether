@@ -95,6 +95,11 @@ function SettingsPageInner() {
   const [defaultWorkingDirSaved, setDefaultWorkingDirSaved] = useState(false);
   const [showDirPicker, setShowDirPicker] = useState(false);
 
+  // Shell inactivity timeout state
+  const [shellTimeout, setShellTimeout] = useState(120);
+  const [shellTimeoutSaving, setShellTimeoutSaving] = useState(false);
+  const [shellTimeoutSaved, setShellTimeoutSaved] = useState(false);
+
   // Memory system state
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [memoryRepoPath, setMemoryRepoPath] = useState('');
@@ -147,6 +152,9 @@ function SettingsPageInner() {
         }
         if (appSettings.content_width) {
           setContentWidth(parseInt(appSettings.content_width, 10) || 100);
+        }
+        if (appSettings.shell_inactivity_timeout) {
+          setShellTimeout(parseInt(appSettings.shell_inactivity_timeout, 10) || 120);
         }
         // Memory settings
         if (appSettings.memory_enabled !== undefined) {
@@ -330,6 +338,26 @@ function SettingsPageInner() {
       // ignore
     } finally {
       setDefaultWorkingDirSaving(false);
+    }
+  };
+
+  const saveShellTimeout = async (seconds: number) => {
+    setShellTimeoutSaving(true);
+    try {
+      const res = await fetch("/api/settings/app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { shell_inactivity_timeout: String(seconds) } }),
+      });
+      if (res.ok) {
+        setShellTimeout(seconds);
+        setShellTimeoutSaved(true);
+        setTimeout(() => setShellTimeoutSaved(false), 2000);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setShellTimeoutSaving(false);
     }
   };
 
@@ -525,6 +553,57 @@ function SettingsPageInner() {
                 Clear default
               </button>
             )}
+          </div>
+
+          {/* Shell Timeout */}
+          <div className="rounded-lg border border-border/50 p-4 transition-shadow hover:shadow-sm">
+            <h2 className="text-sm font-medium">Shell Command Timeout</h2>
+            <p className="mb-4 text-xs text-muted-foreground">
+              How long to wait for shell commands before cancelling due to inactivity.
+              Commands waiting for input or producing no output will be killed after this timeout.
+            </p>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>30s</span>
+                <span className="font-medium text-foreground">{shellTimeout}s ({Math.floor(shellTimeout / 60)}m {shellTimeout % 60}s)</span>
+                <span>600s</span>
+              </div>
+              <input
+                type="range"
+                min={30}
+                max={600}
+                step={30}
+                value={shellTimeout}
+                onChange={(e) => setShellTimeout(parseInt(e.target.value, 10))}
+                onMouseUp={() => saveShellTimeout(shellTimeout)}
+                onTouchEnd={() => saveShellTimeout(shellTimeout)}
+                disabled={shellTimeoutSaving}
+                className="w-full accent-primary"
+              />
+              <div className="flex items-center justify-between">
+                <div className="flex gap-2">
+                  {[60, 120, 300].map((preset) => (
+                    <button
+                      key={preset}
+                      onClick={() => saveShellTimeout(preset)}
+                      className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                        shellTimeout === preset
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
+                      }`}
+                    >
+                      {preset === 60 ? "1 min" : preset === 120 ? "2 min (default)" : "5 min"}
+                    </button>
+                  ))}
+                </div>
+                {shellTimeoutSaved && (
+                  <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Takes effect on the next Gemini session. Lower values prevent commands from hanging.
+              </p>
+            </div>
           </div>
 
           {/* Memory System */}

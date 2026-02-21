@@ -146,6 +146,12 @@ async function _doInit(targetDir: string): Promise<void> {
       );
     }
 
+    // Shell inactivity timeout: configurable via Aether settings, default 120s
+    const shellTimeoutSetting = getSetting('shell_inactivity_timeout');
+    const shellInactivityTimeoutSeconds = shellTimeoutSetting
+      ? parseInt(shellTimeoutSetting, 10) || 120
+      : 120;
+
     config = new Config({
       sessionId: randomUUID(),
       clientVersion: '2.0.0-aether',
@@ -155,6 +161,7 @@ async function _doInit(targetDir: string): Promise<void> {
       debugMode: false,
       interactive: true,
       approvalMode: ApprovalMode.DEFAULT,
+      shellToolInactivityTimeout: shellInactivityTimeoutSeconds,
     });
 
     await config.initialize();
@@ -270,8 +277,36 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
  *
  * Returns an unsubscribe function.
  */
+/**
+ * Track the last emitted liveOutput per tool call so we only send deltas.
+ * Uses globalThis to survive module reloads in Next.js dev (Turbopack).
+ */
+const LIVE_OUTPUT_KEY = '__geminiLiveOutputTracker__' as const;
+
+function getLiveOutputTracker(): Map<string, string> {
+  if (!(globalThis as Record<string, unknown>)[LIVE_OUTPUT_KEY]) {
+    (globalThis as Record<string, unknown>)[LIVE_OUTPUT_KEY] = new Map<string, string>();
+  }
+  return (globalThis as Record<string, unknown>)[LIVE_OUTPUT_KEY] as Map<string, string>;
+}
+
+/**
+ * Track the last emitted status per tool call to avoid duplicate status SSEs.
+ */
+const STATUS_TRACKER_KEY = '__geminiToolStatusTracker__' as const;
+
+function getStatusTracker(): Map<string, string> {
+  if (!(globalThis as Record<string, unknown>)[STATUS_TRACKER_KEY]) {
+    (globalThis as Record<string, unknown>)[STATUS_TRACKER_KEY] = new Map<string, string>();
+  }
+  return (globalThis as Record<string, unknown>)[STATUS_TRACKER_KEY] as Map<string, string>;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _subscribeToolCallsUpdate(bus: any): () => void {
+  const liveOutputTracker = getLiveOutputTracker();
+  const statusTracker = getStatusTracker();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handler = (rawMsg: any) => {
     const msg = rawMsg as {
@@ -283,8 +318,67 @@ function _subscribeToolCallsUpdate(bus: any): () => void {
     const pendingMap = getPendingMap();
 
     for (const tc of msg.toolCalls) {
-      if (tc.status !== 'awaiting_approval') continue;
-      const waiting = tc as unknown as {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const toolCall = tc as any;
+      const callId: string = toolCall.request?.callId;
+      const toolName: string = toolCall.request?.name || 'unknown';
+      const status: string = toolCall.status;
+
+      // --- Emit tool status transitions as SSE status events ---
+      if (callId && status) {
+        const lastStatus = statusTracker.get(callId);
+        if (lastStatus !== status) {
+          statusTracker.set(callId, status);
+          // Emit a status SSE for the tool state transition
+          if (activeController) {
+            try {
+              activeController.enqueue(formatSSE({
+                type: 'status',
+                data: JSON.stringify({
+                  tool_status: status,
+                  tool_name: toolName,
+                  tool_call_id: callId,
+                }),
+              }));
+            } catch {
+              // Controller may be closed
+            }
+          }
+
+          // Clean up trackers when tool reaches terminal state
+          if (status === 'success' || status === 'error' || status === 'cancelled') {
+            statusTracker.delete(callId);
+            liveOutputTracker.delete(callId);
+          }
+        }
+      }
+
+      // --- Stream live tool output during execution ---
+      if (status === 'executing' && toolCall.liveOutput && callId) {
+        const currentOutput = String(toolCall.liveOutput);
+        const lastOutput = liveOutputTracker.get(callId) || '';
+
+        // Only emit the delta (new content since last emission)
+        if (currentOutput.length > lastOutput.length) {
+          const delta = currentOutput.slice(lastOutput.length);
+          liveOutputTracker.set(callId, currentOutput);
+
+          if (activeController && delta.trim()) {
+            try {
+              activeController.enqueue(formatSSE({
+                type: 'tool_output',
+                data: delta,
+              }));
+            } catch {
+              // Controller may be closed
+            }
+          }
+        }
+      }
+
+      // --- Handle awaiting_approval (permission request) ---
+      if (status !== 'awaiting_approval') continue;
+      const waiting = toolCall as unknown as {
         request: { callId: string; name: string; args: Record<string, unknown> };
         correlationId?: string;
         confirmationDetails?: Record<string, unknown>;
@@ -344,7 +438,12 @@ function _subscribeToolCallsUpdate(bus: any): () => void {
   };
 
   bus.subscribe(MessageBusType.TOOL_CALLS_UPDATE, handler);
-  return () => bus.unsubscribe(MessageBusType.TOOL_CALLS_UPDATE, handler);
+  return () => {
+    bus.unsubscribe(MessageBusType.TOOL_CALLS_UPDATE, handler);
+    // Clean up trackers when stream ends
+    liveOutputTracker.clear();
+    statusTracker.clear();
+  };
 }
 
 /**
