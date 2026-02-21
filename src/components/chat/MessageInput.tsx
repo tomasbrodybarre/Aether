@@ -124,11 +124,10 @@ const MODE_OPTIONS: ModeOption[] = [
   { value: 'ask', label: 'Ask', icon: HelpCircleIcon, description: 'Answer questions only' },
 ];
 
-// Gemini model options — used directly with Gemini CLI Core
-const DEFAULT_MODEL_OPTIONS = [
+// Fallback model options (used until /api/models responds)
+const FALLBACK_MODEL_OPTIONS = [
   { value: 'gemini-2.5-pro', label: '2.5 Pro' },
   { value: 'gemini-2.5-flash', label: '2.5 Flash' },
-  { value: 'gemini-2.0-flash', label: '2.0 Flash' },
 ];
 
 /**
@@ -334,6 +333,23 @@ export function MessageInput({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [badge, setBadge] = useState<CommandBadge | null>(null);
+  const [dynamicModels, setDynamicModels] = useState<{ value: string; label: string }[] | null>(null);
+
+  // Fetch available models from Core library on mount
+  useEffect(() => {
+    fetch('/api/models')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.models && data.models.length > 0) {
+          setDynamicModels(data.models.map((m: { value: string; label: string }) => ({
+            value: m.value,
+            label: m.label,
+          })));
+        }
+      })
+      .catch(() => { /* use fallback */ });
+  }, []);
+
   // Prompt history state (arrow-up/down to recall previous prompts)
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1); // -1 = not browsing
@@ -366,8 +382,8 @@ export function MessageInput({
     hadQueueRef.current = !!hasQueuedMessage;
   }, [isStreaming, hasQueuedMessage]);
 
-  // Gemini models — used directly, no provider-based relabeling needed
-  const MODEL_OPTIONS = DEFAULT_MODEL_OPTIONS;
+  // Use dynamically fetched models from Core library, fall back to hardcoded list
+  const MODEL_OPTIONS = dynamicModels ?? FALLBACK_MODEL_OPTIONS;
 
   // Fetch files for @ mention
   const fetchFiles = useCallback(async (filter: string) => {
