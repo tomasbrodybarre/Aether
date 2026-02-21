@@ -17,10 +17,16 @@ import {
   Config,
   AuthType,
   ApprovalMode,
+  PolicyDecision,
   GeminiEventType,
   MessageBusType,
   ToolConfirmationOutcome,
+  Scheduler,
+  ROOT_SCHEDULER_ID,
   type ServerGeminiStreamEvent,
+  type ToolCallRequestInfo,
+  type CompletedToolCall,
+  type ToolCall,
 } from '@google/gemini-cli-core';
 import { randomUUID } from 'node:crypto';
 import os from 'os';
@@ -53,17 +59,16 @@ export interface GeminiStreamOptions {
 }
 
 /**
- * Pending confirmation request from the MessageBus.
- * Stored until the browser user responds via POST /api/chat/permission.
+ * Pending tool confirmation from the Scheduler.
+ * When the Scheduler sets a tool to `awaiting_approval`, we store
+ * the correlationId here so that when the browser user responds
+ * via POST /api/chat/permission, we can publish a
+ * TOOL_CONFIRMATION_RESPONSE to the MessageBus.
  */
 interface PendingConfirmation {
   correlationId: string;
-  details: unknown; // SerializableConfirmationDetails from bus
+  toolName: string;
   createdAt: number;
-  resolve: (response: {
-    confirmed: boolean;
-    outcome?: string;
-  }) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,21 +153,19 @@ async function _doInit(targetDir: string): Promise<void> {
       cwd,
       model,
       debugMode: false,
-      interactive: false,
+      interactive: true,
       approvalMode: ApprovalMode.DEFAULT,
     });
 
     await config.initialize();
     await config.refreshAuth(AuthType.LOGIN_WITH_GOOGLE);
 
-    // Subscribe to the confirmation bus for tool permission requests.
-    // When the PolicyEngine decides ASK_USER, the bus emits a
-    // TOOL_CONFIRMATION_REQUEST. We intercept it here and forward
-    // it to the browser as an SSE event. The browser responds via
-    // POST /api/chat/permission, which calls resolveConfirmation().
-    const bus = config.getMessageBus();
-
-    _subscribeConfirmationBus(bus);
+    // -----------------------------------------------------------------
+    // Auto-approve policy rules (user tier 2.x — overrides defaults)
+    // Mirrors the old Claude backend's canUseTool allow-list so common
+    // read-only actions and memory-repo operations don't prompt.
+    // -----------------------------------------------------------------
+    _addAutoApproveRules(config);
 
     isInitialized = true;
     console.log('[gemini-core] Initialized successfully');
@@ -173,53 +176,156 @@ async function _doInit(targetDir: string): Promise<void> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Auto-approve policy rules
+// ---------------------------------------------------------------------------
+
 /**
- * Subscribe to the MessageBus confirmation channel.
- * Extracted to a helper to keep _doInit() clean and avoid
- * TS generic inference issues with the Message union.
+ * Add user-tier policy rules that auto-approve common safe operations.
+ * Priority 2.5 (user tier) — higher than default tier 1.x rules,
+ * so these reliably override the built-in ASK_USER defaults for
+ * write.toml tools we consider safe in Aether's context.
+ *
+ * Matches the old Claude backend's canUseTool allow-list:
+ *   - All read-only tools (glob, grep_search, list_directory, read_file,
+ *     google_web_search) — already allowed by default read-only.toml but
+ *     we reinforce at higher priority
+ *   - Git operations on memory/skills repos (pull, push, status, etc.)
+ *   - save_memory tool (used internally by Gemini Core)
+ *   - web_fetch (for web search results)
+ */
+function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
+  const pe = cfg.getPolicyEngine();
+  const PRIORITY = 2.5; // User tier, above defaults
+  const SOURCE = 'Aether Auto-Approve';
+
+  // 1. Read-only tools — reinforce at user-tier priority
+  const readOnlyTools = [
+    'glob',
+    'grep_search',
+    'list_directory',
+    'read_file',
+    'google_web_search',
+  ];
+  for (const toolName of readOnlyTools) {
+    pe.addRule({
+      toolName,
+      decision: PolicyDecision.ALLOW,
+      priority: PRIORITY,
+      source: SOURCE,
+    });
+  }
+
+  // 2. save_memory — DENY. Aether uses its own memory system
+  //    (C:/claude-hub/memory) via git, not Gemini's built-in GEMINI.md.
+  pe.addRule({
+    toolName: 'save_memory',
+    decision: PolicyDecision.DENY,
+    priority: PRIORITY,
+    source: SOURCE,
+    denyMessage: 'save_memory is disabled in Aether. Use the memory repo (C:/claude-hub/memory) via git instead.',
+  });
+
+  // 3. web_fetch — for retrieving web content
+  pe.addRule({
+    toolName: 'web_fetch',
+    decision: PolicyDecision.ALLOW,
+    priority: PRIORITY,
+    source: SOURCE,
+  });
+
+  // 4. Shell commands — auto-approve safe git operations on memory/skills repos
+  //    The argsPattern is matched against stableStringify(args), which produces
+  //    something like: {"command":"git -C C:/claude-hub/memory pull"}
+  //    We require -C pointing at known repos for safety.
+  const safeGitOps = [
+    'pull', 'fetch', 'status', 'log', 'diff', 'add', 'commit', 'push',
+    'rev-parse', 'branch', 'remote',
+  ].join('|');
+  const memoryRepoPatterns = [
+    'C:/claude-hub/memory',
+    'C:\\\\claude-hub\\\\memory',
+    'C:/claude-hub/skills',
+    'C:\\\\claude-hub\\\\skills',
+  ].map(p => p.replace(/[/\\]/g, '[\\\\/\\\\\\\\]')).join('|');
+
+  pe.addRule({
+    toolName: 'run_shell_command',
+    decision: PolicyDecision.ALLOW,
+    priority: PRIORITY,
+    argsPattern: new RegExp(`git\\s+-C\\s+(${memoryRepoPatterns})\\s+(${safeGitOps})`),
+    source: `${SOURCE} (memory/skills git)`,
+  });
+
+  const ruleCount = readOnlyTools.length + 3; // reads + save_memory(deny) + web_fetch + shell
+  console.log(`[gemini-core] Added ${ruleCount} auto-approve policy rules`);
+}
+
+/**
+ * Subscribe to TOOL_CALLS_UPDATE on the MessageBus to detect tools
+ * awaiting confirmation. When a tool is in `awaiting_approval` status,
+ * we emit an SSE `permission_request` to the browser and store the
+ * correlationId so resolveConfirmation() can respond.
+ *
+ * Returns an unsubscribe function.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _subscribeConfirmationBus(bus: any): void {
-  bus.subscribe(
-    MessageBusType.TOOL_CONFIRMATION_REQUEST,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (rawMsg: any) => {
-      const msg = rawMsg as {
-        type: string;
-        correlationId: string;
-        toolCall?: { name?: string; args?: Record<string, unknown> };
-        details?: unknown;
+function _subscribeToolCallsUpdate(bus: any): () => void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handler = (rawMsg: any) => {
+    const msg = rawMsg as {
+      type: string;
+      toolCalls: ToolCall[];
+      schedulerId: string;
+    };
+
+    const pendingMap = getPendingMap();
+
+    for (const tc of msg.toolCalls) {
+      if (tc.status !== 'awaiting_approval') continue;
+      const waiting = tc as unknown as {
+        request: { callId: string; name: string; args: Record<string, unknown> };
+        correlationId?: string;
+        confirmationDetails?: Record<string, unknown>;
       };
-      const pendingMap = getPendingMap();
 
-      // Create a promise that will be resolved when the user responds
-      const confirmationPromise = new Promise<{
-        confirmed: boolean;
-        outcome?: string;
-      }>((resolve) => {
-        pendingMap.set(msg.correlationId, {
-          correlationId: msg.correlationId,
-          details: msg.details,
-          createdAt: Date.now(),
-          resolve,
-        });
+      const correlationId = waiting.correlationId;
+      if (!correlationId) continue;
 
-        // Auto-deny after timeout
-        setTimeout(() => {
-          if (pendingMap.has(msg.correlationId)) {
-            resolve({ confirmed: false });
-            pendingMap.delete(msg.correlationId);
-          }
-        }, CONFIRMATION_TIMEOUT_MS);
+      // Skip if we already emitted this confirmation
+      if (pendingMap.has(correlationId)) continue;
+
+      // Store the pending confirmation
+      pendingMap.set(correlationId, {
+        correlationId,
+        toolName: waiting.request.name,
+        createdAt: Date.now(),
       });
 
-      // Build a permission event matching the frontend's expected format
+      // Auto-expire after timeout
+      setTimeout(() => {
+        if (pendingMap.has(correlationId)) {
+          pendingMap.delete(correlationId);
+          // Publish a cancel response to unblock the scheduler
+          if (config) {
+            const b = config.getMessageBus();
+            b.publish({
+              type: MessageBusType.TOOL_CONFIRMATION_RESPONSE,
+              correlationId,
+              confirmed: false,
+              outcome: ToolConfirmationOutcome.Cancel,
+            });
+          }
+        }
+      }, CONFIRMATION_TIMEOUT_MS);
+
+      // Build the SSE permission event
       const permEvent: PermissionRequestEvent = {
-        permissionRequestId: msg.correlationId,
-        toolName: msg.toolCall?.name || 'unknown',
-        toolInput: (msg.toolCall?.args || {}) as Record<string, unknown>,
-        toolUseId: msg.correlationId,
-        description: _extractConfirmationTitle(msg.details),
+        permissionRequestId: correlationId,
+        toolName: waiting.request.name,
+        toolInput: waiting.request.args || {},
+        toolUseId: waiting.request.callId,
+        description: _extractConfirmationTitle(waiting.confirmationDetails),
       };
 
       // Push to the active SSE stream
@@ -230,23 +336,14 @@ function _subscribeConfirmationBus(bus: any): void {
             data: JSON.stringify(permEvent),
           }));
         } catch {
-          // Controller may be closed if the stream ended
+          // Controller may be closed
         }
       }
+    }
+  };
 
-      // Wait for user response, then publish back to the bus
-      confirmationPromise.then((response) => {
-        bus.publish({
-          type: MessageBusType.TOOL_CONFIRMATION_RESPONSE,
-          correlationId: msg.correlationId,
-          confirmed: response.confirmed,
-          outcome: response.confirmed
-            ? (response.outcome || ToolConfirmationOutcome.ProceedOnce)
-            : ToolConfirmationOutcome.Cancel,
-        });
-      });
-    },
-  );
+  bus.subscribe(MessageBusType.TOOL_CALLS_UPDATE, handler);
+  return () => bus.unsubscribe(MessageBusType.TOOL_CALLS_UPDATE, handler);
 }
 
 /**
@@ -280,18 +377,25 @@ function _extractConfirmationTitle(details: unknown): string | undefined {
 
 /**
  * Resolve a pending confirmation request with the user's decision.
+ * Publishes a TOOL_CONFIRMATION_RESPONSE to the MessageBus so the
+ * Scheduler can continue processing the tool.
  * Returns true if found and resolved.
  */
-export function resolveConfirmation(
+export async function resolveConfirmation(
   correlationId: string,
   approved: boolean,
-): boolean {
+): Promise<boolean> {
   const pendingMap = getPendingMap();
   const entry = pendingMap.get(correlationId);
   if (!entry) return false;
+  if (!config) return false;
 
-  entry.resolve({
+  const bus = config.getMessageBus();
+  await bus.publish({
+    type: MessageBusType.TOOL_CONFIRMATION_RESPONSE,
+    correlationId,
     confirmed: approved,
+    requiresUserConfirmation: false,
     outcome: approved
       ? ToolConfirmationOutcome.ProceedOnce
       : ToolConfirmationOutcome.Cancel,
@@ -931,6 +1035,9 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
       // Register this controller as the active SSE target
       activeController = controller;
 
+      // Track the bus subscription so we can clean up
+      let unsubscribeToolCallsUpdate: (() => void) | null = null;
+
       try {
         // Ensure Core is initialized
         await initGeminiCore(workingDirectory || process.cwd());
@@ -1000,33 +1107,121 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
           }),
         }));
 
-        // Get the client and start streaming
+        // Get the client and set up the agent loop
         const client = config.getGeminiClient();
         const promptId = randomUUID();
         const signal = abortController?.signal || new AbortController().signal;
+        const bus = config.getMessageBus();
 
-        const stream = client.sendMessageStream(
-          [{ text: finalPromptText }],
-          signal,
-          promptId,
-        );
+        // Subscribe to TOOL_CALLS_UPDATE for confirmation forwarding to SSE
+        unsubscribeToolCallsUpdate = _subscribeToolCallsUpdate(bus);
 
-        for await (const event of stream) {
-          if (abortController?.signal.aborted) break;
+        // Create the Scheduler for tool execution
+        const scheduler = new Scheduler({
+          config,
+          messageBus: bus,
+          getPreferredEditor: () => undefined, // Aether is web-based, no terminal editor
+          schedulerId: ROOT_SCHEDULER_ID,
+        });
 
-          // Check for memory writes on tool requests
-          if (event.type === GeminiEventType.ToolCallRequest) {
-            const req = (event as { value: {
-              name: string;
-              args: Record<string, unknown>;
-            } }).value;
-            checkMemoryWrite(controller, req.name, req.args);
+        // ---------------------------------------------------------------
+        // Agent loop: stream → collect tool requests → execute → continue
+        // ---------------------------------------------------------------
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let queryParts: any = [{ text: finalPromptText }];
+        let turnCount = 0;
+        const MAX_AGENT_TURNS = 25; // Safety limit
+
+        while (turnCount < MAX_AGENT_TURNS) {
+          turnCount++;
+          if (signal.aborted) break;
+
+          // Stream a single model turn
+          const toolCallRequests: ToolCallRequestInfo[] = [];
+          const stream = client.sendMessageStream(queryParts, signal, promptId);
+
+          for await (const event of stream) {
+            if (signal.aborted) break;
+
+            // Collect tool call requests for scheduling after the stream
+            if (event.type === GeminiEventType.ToolCallRequest) {
+              const req = (event as { value: ToolCallRequestInfo }).value;
+              toolCallRequests.push(req);
+              // Check for memory writes
+              checkMemoryWrite(controller, req.name, req.args);
+            }
+
+            // Map and emit SSE event to the browser
+            const sseEvent = mapEventToSSE(event);
+            if (sseEvent) {
+              controller.enqueue(formatSSE(sseEvent));
+            }
           }
 
-          const sseEvent = mapEventToSSE(event);
-          if (sseEvent) {
-            controller.enqueue(formatSSE(sseEvent));
+          // If no tool calls were requested, the model is done
+          if (toolCallRequests.length === 0 || signal.aborted) {
+            break;
           }
+
+          // Schedule tool execution — blocks until all tools in the
+          // batch are done (including any user confirmations)
+          console.log(`[gemini-core] Scheduling ${toolCallRequests.length} tool call(s)...`);
+          const completedTools: CompletedToolCall[] = await scheduler.schedule(
+            toolCallRequests,
+            signal,
+          );
+
+          // Emit tool results as SSE events
+          for (const tc of completedTools) {
+            const resp = tc.response;
+            if (!resp) continue;
+
+            const textParts: string[] = [];
+            if (resp.responseParts) {
+              for (const part of resp.responseParts) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const p = part as any;
+                if (p.text) textParts.push(p.text as string);
+              }
+            }
+
+            controller.enqueue(formatSSE({
+              type: 'tool_result',
+              data: JSON.stringify({
+                tool_use_id: tc.request.callId,
+                content: textParts.join('\n') || (resp.error ? resp.error.message : '(no output)'),
+                is_error: tc.status === 'error' || tc.status === 'cancelled',
+              }),
+            }));
+          }
+
+          // If all tools were cancelled, stop the loop
+          if (completedTools.every(tc => tc.status === 'cancelled')) {
+            console.log('[gemini-core] All tools cancelled, ending agent loop');
+            break;
+          }
+
+          // Build continuation query from tool response parts
+          const responseParts = completedTools
+            .filter(tc => tc.response?.responseParts)
+            .flatMap(tc => tc.response.responseParts);
+
+          if (responseParts.length === 0) {
+            console.log('[gemini-core] No response parts from tools, ending agent loop');
+            break;
+          }
+
+          // Continue the conversation with tool results
+          queryParts = responseParts;
+          console.log(`[gemini-core] Continuing with ${responseParts.length} response part(s), turn ${turnCount}`);
+        }
+
+        if (turnCount >= MAX_AGENT_TURNS) {
+          console.warn(`[gemini-core] Hit max agent turns (${MAX_AGENT_TURNS})`);
+          controller.enqueue(formatSSE({
+            type: 'status',
+            data: JSON.stringify({ warning: 'Max agent turns reached' }),
+          }));
         }
 
         // Stream complete
@@ -1050,6 +1245,10 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
         controller.enqueue(formatSSE({ type: 'done', data: '' }));
         controller.close();
       } finally {
+        // Unsubscribe from bus
+        if (unsubscribeToolCallsUpdate) {
+          unsubscribeToolCallsUpdate();
+        }
         // Clear active controller
         if (activeController === controller) {
           activeController = null;

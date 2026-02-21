@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     }
 
     const approved = decision.behavior === 'allow';
-    const found = resolveConfirmation(permissionRequestId, approved);
+    const found = await resolveConfirmation(permissionRequestId, approved);
 
     if (!found) {
       return new Response(
