@@ -168,9 +168,17 @@ export function StreamingMessage({
   return (
     <AIMessage from="assistant">
       <MessageContent>
-        {/* Streaming text content rendered via Streamdown */}
+        {/* During streaming: raw pre-wrap text (zero parse overhead).
+            Full Streamdown formatting renders on the persisted message
+            in MessageItem once the stream completes. */}
         {content && (
-          <MessageResponse>{content}</MessageResponse>
+          isStreaming ? (
+            <div className="size-full whitespace-pre-wrap break-words text-sm leading-relaxed [overflow-wrap:anywhere]">
+              {content}
+            </div>
+          ) : (
+            <MessageResponse>{content}</MessageResponse>
+          )
         )}
 
         {/* Tool calls — compact collapsible group, below text */}
