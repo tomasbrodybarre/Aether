@@ -437,26 +437,16 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
                                   {turn.title}
                                 </span>
                                 <div className="flex items-center gap-1.5 min-w-0">
-                                  <span
-                                    className={cn(
-                                      "text-[0.5625rem] px-1 py-0.5 rounded font-medium leading-none shrink-0",
-                                      badgeCfg.className
-                                    )}
-                                  >
-                                    {badgeCfg.label}
-                                  </span>
-                                  {turn.project_tag && (
-                                    <ProjectTagEditor
-                                      currentTag={turn.project_tag}
-                                      isManualOverride={isManualTag}
-                                      autoTag=""
-                                      allTags={allProjectTags}
-                                      onTagChange={(tag) =>
-                                        handleTurnTagChange(turn.id, tag)
-                                      }
-                                      variant="sidebar"
-                                    />
-                                  )}
+                                  <ProjectTagEditor
+                                    currentTag={turn.project_tag || ''}
+                                    isManualOverride={isManualTag}
+                                    autoTag=""
+                                    allTags={allProjectTags}
+                                    onTagChange={(tag) =>
+                                      handleTurnTagChange(turn.id, tag)
+                                    }
+                                    variant="sidebar"
+                                  />
                                   <span className="text-[0.625rem] text-muted-foreground/40 shrink-0 ml-auto">
                                     {formatRelativeTime(turn.created_at)}
                                   </span>

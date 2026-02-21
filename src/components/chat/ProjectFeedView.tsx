@@ -65,7 +65,9 @@ export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedVi
   const currentPermission = permissionQueue[0] ?? null;
   const [streamingToolOutput, setStreamingToolOutput] = useState('');
   const [workingDir, setWorkingDir] = useState('');
+  const [queuedMessage, setQueuedMessage] = useState<{ content: string; files?: FileAttachment[] } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const interruptRef = useRef(false);
 
   // RAF-based throttle for streaming content
   const accumulatedRef = useRef('');
@@ -133,6 +135,19 @@ export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedVi
     abortControllerRef.current = null;
   }, []);
 
+  const interruptStreaming = useCallback(
+    (interruptMessage?: { content: string; files?: FileAttachment[] }) => {
+      if (!isStreaming) return;
+      if (interruptMessage) {
+        interruptRef.current = true;
+        setQueuedMessage(interruptMessage);
+      }
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+    },
+    [isStreaming]
+  );
+
   const handlePermissionResponse = useCallback(
     async (decision: 'allow' | 'allow_session' | 'deny') => {
       if (!currentPermission) return;
@@ -183,7 +198,10 @@ export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedVi
 
   const sendMessage = useCallback(
     async (content: string, files?: FileAttachment[]) => {
-      if (isStreaming) return;
+      if (isStreaming) {
+        setQueuedMessage({ content, files });
+        return;
+      }
 
       // Build display content with file metadata
       let displayContent = content;
@@ -567,6 +585,17 @@ export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedVi
     [messages, sendMessage]
   );
 
+  // Auto-send queued message when streaming completes
+  useEffect(() => {
+    if (!isStreaming && queuedMessage) {
+      const { content, files } = queuedMessage;
+      const wasInterrupt = interruptRef.current;
+      interruptRef.current = false;
+      setQueuedMessage(null);
+      setTimeout(() => sendMessage(content, files), wasInterrupt ? 0 : 100);
+    }
+  }, [isStreaming, queuedMessage, sendMessage]);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <MessageList
@@ -588,6 +617,9 @@ export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedVi
         onSend={sendMessage}
         onCommand={handleCommand}
         onStop={stopStreaming}
+        onInterrupt={interruptStreaming}
+        hasQueuedMessage={!!queuedMessage}
+        onClearQueue={() => setQueuedMessage(null)}
         disabled={false}
         isStreaming={isStreaming}
         modelName={currentModel}

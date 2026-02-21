@@ -96,7 +96,9 @@ export function ProjectTagEditor({
               "hover:bg-accent/60 cursor-pointer",
               isManualOverride
                 ? "bg-violet-500/10 text-violet-400"
-                : "text-muted-foreground/50"
+                : currentTag
+                  ? "text-muted-foreground/50"
+                  : "text-muted-foreground/30 hover:text-muted-foreground/60"
             )}
             onClick={(e) => {
               e.preventDefault();
@@ -104,10 +106,12 @@ export function ProjectTagEditor({
               setOpen(true);
             }}
           >
-            {isManualOverride && (
+            {isManualOverride ? (
               <HugeiconsIcon icon={Tag01Icon} className="h-2 w-2 shrink-0" />
-            )}
-            <span className="truncate">{currentTag || "untagged"}</span>
+            ) : !currentTag ? (
+              <HugeiconsIcon icon={Tag01Icon} className="h-2 w-2 shrink-0 opacity-50" />
+            ) : null}
+            <span className="truncate">{currentTag || "tag"}</span>
           </button>
         </PopoverTrigger>
         <PopoverContent
