@@ -31,7 +31,7 @@ interface NavRailProps {
 }
 
 const navItems = [
-  { href: "/chat", label: "Chats", icon: Message02Icon },
+  { href: "/project/current", label: "Projects", icon: Message02Icon },
   { href: "/extensions", label: "Extensions", icon: GridIcon },
   { href: "/settings", label: "Settings", icon: Settings02Icon },
 ] as const;
@@ -41,7 +41,7 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  const isChatRoute = pathname === "/chat" || pathname.startsWith("/chat/");
+  const isChatRoute = pathname.startsWith("/project/") || pathname === "/chat" || pathname.startsWith("/chat/");
 
   useEffect(() => {
     setMounted(true);
@@ -50,7 +50,7 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
   return (
     <aside className="flex w-14 shrink-0 flex-col items-center bg-sidebar pb-3 pt-3">
       {/* Logo */}
-      <Link href="/chat" className="mb-3">
+      <Link href="/project/current" className="mb-3">
         <Image
           src="/aether_logo.png"
           alt="Aether"
@@ -69,7 +69,7 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
             size="icon"
             className="mb-2 h-9 w-9"
           >
-            <Link href="/chat">
+            <Link href="/project/current">
               <HugeiconsIcon icon={PlusSignIcon} className="h-4 w-4" />
               <span className="sr-only">New Chat</span>
             </Link>
@@ -85,8 +85,8 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
       <nav className="flex flex-1 flex-col items-center gap-1">
         {navItems.map((item) => {
           const isActive =
-            item.href === "/chat"
-              ? pathname === "/chat" || pathname.startsWith("/chat/")
+            item.href === "/project/current"
+              ? pathname.startsWith("/project/") || pathname === "/chat" || pathname.startsWith("/chat/")
               : item.href === "/extensions"
                 ? pathname.startsWith("/extensions")
                 : pathname === item.href || pathname.startsWith(item.href + "?");
@@ -94,7 +94,7 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
           return (
             <Tooltip key={item.href}>
               <TooltipTrigger asChild>
-                {item.href === "/chat" ? (
+                {item.href === "/project/current" ? (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -104,8 +104,7 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
                     )}
                     onClick={() => {
                       if (!isChatRoute) {
-                        // Navigate to chat page first, then open chat list
-                        router.push("/chat");
+                        router.push("/project/current");
                         onToggleChatList();
                       } else {
                         onToggleChatList();

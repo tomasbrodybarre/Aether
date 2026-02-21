@@ -57,9 +57,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  // Panel state
-  const isChatRoute = pathname.startsWith("/chat/") || pathname === "/chat";
-  const isChatDetailRoute = pathname.startsWith("/chat/");
+  // Panel state — includes both legacy /chat and new /project routes
+  const isChatRoute = pathname.startsWith("/chat/") || pathname === "/chat" || pathname.startsWith("/project/");
+  const isChatDetailRoute = pathname.startsWith("/chat/") || pathname.startsWith("/project/");
 
   // Auto-close chat list when leaving chat routes
   const setChatListOpen = useCallback((open: boolean) => {

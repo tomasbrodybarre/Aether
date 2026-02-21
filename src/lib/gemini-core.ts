@@ -40,7 +40,7 @@ import type {
   PermissionRequestEvent,
 } from '@/types';
 import { isImageFile } from '@/types';
-import { getSetting, updateSessionProjectTag } from './db';
+import { getSetting, updateSessionProjectTag, updateTurnProjectTag } from './db';
 import { processAetherInitDirectives } from './aether-init';
 
 // ---------------------------------------------------------------------------
@@ -216,14 +216,15 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
     });
   }
 
-  // 2. save_memory — DENY. Aether uses its own memory system
-  //    (C:/claude-hub/memory) via git, not Gemini's built-in GEMINI.md.
+  // 2. save_memory — ASK_USER. Gemini's built-in memory tool writes to
+  //    ~/.gemini/GEMINI.md which is separate from Aether's memory repo
+  //    (C:/claude-hub/memory). Prompt the user so they can gate what
+  //    goes into GEMINI.md vs the memory folder.
   pe.addRule({
     toolName: 'save_memory',
-    decision: PolicyDecision.DENY,
+    decision: PolicyDecision.ASK_USER,
     priority: PRIORITY,
     source: SOURCE,
-    denyMessage: 'save_memory is disabled in Aether. Use the memory repo (C:/claude-hub/memory) via git instead.',
   });
 
   // 3. web_fetch — for retrieving web content
@@ -882,8 +883,9 @@ const TAG_SCAN_LIMIT = 300; // chars of text content to scan before giving up
  * When `enabled` is false, acts as a passthrough.
  */
 export function createTagDetectionTransform(
-  sessionId: string,
+  entityId: string,
   enabled: boolean,
+  entityType: 'session' | 'turn' = 'session',
 ): TransformStream<string, string> {
   if (!enabled) {
     return new TransformStream(); // passthrough
@@ -927,9 +929,13 @@ export function createTagDetectionTransform(
         const detectedTag = match[1].trim();
         scanning = false;
 
-        // Update DB
+        // Update DB — route to correct table based on entity type
         try {
-          updateSessionProjectTag(sessionId, detectedTag, 'inferred');
+          if (entityType === 'turn') {
+            updateTurnProjectTag(entityId, detectedTag, 'inferred');
+          } else {
+            updateSessionProjectTag(entityId, detectedTag, 'inferred');
+          }
         } catch {
           // best effort
         }

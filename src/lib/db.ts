@@ -238,6 +238,24 @@ function migrateDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_turns_created_at ON turns(created_at DESC);
   `);
 
+  // Migrate turns table — add new columns for project-based model
+  const turnCols = db.prepare("PRAGMA table_info(turns)").all() as { name: string }[];
+  const turnColNames = turnCols.map(c => c.name);
+  if (!turnColNames.includes('title')) {
+    db.exec("ALTER TABLE turns ADD COLUMN title TEXT NOT NULL DEFAULT ''");
+    // Backfill titles from existing prompt text
+    db.exec("UPDATE turns SET title = SUBSTR(prompt, 1, 80) WHERE title = ''");
+  }
+  if (!turnColNames.includes('working_directory')) {
+    db.exec("ALTER TABLE turns ADD COLUMN working_directory TEXT");
+  }
+  if (!turnColNames.includes('mode')) {
+    db.exec("ALTER TABLE turns ADD COLUMN mode TEXT NOT NULL DEFAULT 'code'");
+  }
+  if (!turnColNames.includes('project_tag_source')) {
+    db.exec("ALTER TABLE turns ADD COLUMN project_tag_source TEXT");
+  }
+
   // Migrate existing settings to a default provider if api_providers is empty
   const providerCount = db.prepare('SELECT COUNT(*) as count FROM api_providers').get() as { count: number };
   if (providerCount.count === 0) {
@@ -391,9 +409,13 @@ export function clearSessionMessages(sessionId: string): void {
 export interface Turn {
   id: string;
   project_tag: string | null;
+  project_tag_source: 'inferred' | 'manual' | null;
+  title: string;
   prompt: string;
   response: string | null;
   model: string | null;
+  working_directory: string | null;
+  mode: string;
   usage_input: number | null;
   usage_output: number | null;
   tool_calls: number;
@@ -405,14 +427,17 @@ export function createTurn(
   prompt: string,
   projectTag?: string | null,
   model?: string | null,
+  workingDirectory?: string | null,
+  mode?: string | null,
 ): Turn {
   const db = getDb();
   const id = crypto.randomBytes(16).toString('hex');
   const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+  const title = prompt.slice(0, 80) + (prompt.length > 80 ? '...' : '');
 
   db.prepare(
-    'INSERT INTO turns (id, project_tag, prompt, model, created_at) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, projectTag || null, prompt, model || null, now);
+    'INSERT INTO turns (id, project_tag, title, prompt, model, working_directory, mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, projectTag || null, title, prompt, model || null, workingDirectory || null, mode || 'code', now);
 
   return db.prepare('SELECT * FROM turns WHERE id = ?').get(id) as Turn;
 }
@@ -464,9 +489,26 @@ export function getAllProjectTags(): string[] {
   return rows.map(r => r.project_tag);
 }
 
-export function updateTurnProjectTag(id: string, projectTag: string | null): void {
+export function updateTurnProjectTag(
+  id: string,
+  projectTag: string | null,
+  source?: 'inferred' | 'manual' | null,
+): void {
   const db = getDb();
-  db.prepare('UPDATE turns SET project_tag = ? WHERE id = ?').run(projectTag, id);
+  if (source !== undefined) {
+    db.prepare('UPDATE turns SET project_tag = ?, project_tag_source = ? WHERE id = ?').run(projectTag, source, id);
+  } else {
+    db.prepare('UPDATE turns SET project_tag = ? WHERE id = ?').run(projectTag, id);
+  }
+}
+
+/** Get turns for a project in chronological order (oldest first) for feed display */
+export function getTurnsByProjectAsc(projectTag: string | null): Turn[] {
+  const db = getDb();
+  if (projectTag === null) {
+    return db.prepare('SELECT * FROM turns WHERE project_tag IS NULL ORDER BY created_at ASC').all() as Turn[];
+  }
+  return db.prepare('SELECT * FROM turns WHERE project_tag = ? ORDER BY created_at ASC').all(projectTag) as Turn[];
 }
 
 export function deleteTurn(id: string): boolean {

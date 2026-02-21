@@ -194,7 +194,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
       <div className="flex h-full items-center justify-center">
         <div className="text-center space-y-2">
           <p className="text-destructive font-medium">{error}</p>
-          <a href="/chat" className="text-sm text-muted-foreground hover:underline">
+          <a href="/project/current" className="text-sm text-muted-foreground hover:underline">
             Start a new chat
           </a>
         </div>
@@ -206,7 +206,11 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
     <div className="flex h-full min-h-0 flex-col">
       {/* Chat title bar */}
       <div className="flex items-center px-4 py-2">
-        <div className="flex-1 min-w-0" />
+        <div className="flex-1 min-w-0 flex items-center">
+          <span className="text-[0.5625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground/60 font-medium">
+            Legacy
+          </span>
+        </div>
         {sessionTitle && (
           isEditingTitle ? (
             <input

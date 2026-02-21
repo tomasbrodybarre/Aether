@@ -35,7 +35,8 @@ export async function PATCH(
 
     if ('project_tag' in body) {
       // Explicit null or empty string clears the tag
-      updateTurnProjectTag(id, body.project_tag || null);
+      const source = body.project_tag_source ?? (body.project_tag ? 'manual' : null);
+      updateTurnProjectTag(id, body.project_tag || null, source);
     }
 
     const updated = getTurn(id);

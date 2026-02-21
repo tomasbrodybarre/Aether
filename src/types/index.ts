@@ -320,6 +320,7 @@ export type SSEEventType =
   | 'permission_request' // permission approval needed
   | 'memory_observation' // memory system: observation detected, show toast
   | 'project_tag'        // LLM-inferred project tag update
+  | 'turn_created'       // turn-based flow: new turn ID
   | 'done';              // stream complete
 
 export interface SSEEvent {
@@ -471,12 +472,45 @@ export interface GeminiStreamOptions {
 export interface TurnRecord {
   id: string;
   project_tag: string | null;
+  project_tag_source: 'inferred' | 'manual' | null;
+  title: string;
   prompt: string;
   response: string | null;
   model: string | null;
+  working_directory: string | null;
+  mode: string;
   usage_input: number | null;
   usage_output: number | null;
   tool_calls: number;
   created_at: string;
   duration_ms: number | null;
+}
+
+/** Convert a TurnRecord to a pair of Message objects for rendering in MessageList */
+export function turnToMessages(turn: TurnRecord): Message[] {
+  const msgs: Message[] = [];
+
+  msgs.push({
+    id: `${turn.id}-user`,
+    session_id: turn.id,
+    role: 'user',
+    content: turn.prompt,
+    created_at: turn.created_at,
+    token_usage: null,
+  });
+
+  if (turn.response) {
+    msgs.push({
+      id: `${turn.id}-assistant`,
+      session_id: turn.id,
+      role: 'assistant',
+      content: turn.response,
+      created_at: turn.created_at,
+      token_usage: (turn.usage_input || turn.usage_output)
+        ? JSON.stringify({ input_tokens: turn.usage_input || 0, output_tokens: turn.usage_output || 0 })
+        : null,
+    });
+  }
+
+  return msgs;
 }
