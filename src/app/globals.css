@@ -206,8 +206,8 @@
     font-size: 0.875em;
   }
   .dark .is-assistant code:not(pre code) {
-    color: #CF581D;
-    background: rgb(207 88 29 / 12%);
+    color: #C76140;
+    background: rgb(199 97 64 / 12%);
   }
 }
 
