@@ -188,7 +188,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
             </Button>
           </TooltipTrigger>
           <TooltipContent side="right">
-            Import conversations from Claude Code CLI
+            Import conversations from Gemini CLI
           </TooltipContent>
         </Tooltip>
       </div>

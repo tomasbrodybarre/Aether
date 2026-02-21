@@ -157,8 +157,8 @@ export function ImportSessionDialog({
             Import CLI Session
           </DialogTitle>
           <DialogDescription>
-            Browse and import conversations from Claude Code CLI. Imported
-            sessions can be resumed in CodePilot.
+            Browse and import conversations from Gemini CLI. Imported
+            sessions can be resumed in Aether.
           </DialogDescription>
         </DialogHeader>
 
@@ -205,12 +205,12 @@ export function ImportSessionDialog({
                 <p className="text-sm">
                   {searchQuery
                     ? "No matching sessions"
-                    : "No Claude Code CLI sessions found"}
+                    : "No Gemini CLI sessions found"}
                 </p>
                 <p className="text-xs mt-1 opacity-60">
                   {searchQuery
                     ? "Try a different search term"
-                    : "Sessions are stored in ~/.claude/projects/"}
+                    : "Sessions are stored in ~/.gemini/projects/"}
                 </p>
               </div>
             ) : (

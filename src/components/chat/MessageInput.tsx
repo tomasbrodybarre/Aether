@@ -91,12 +91,12 @@ interface CommandBadge {
 
 type PopoverMode = 'file' | 'skill' | null;
 
-// Expansion prompts for CLI-only commands (not natively supported by SDK).
-// SDK-native commands (/compact, /init, /review) are sent as-is — the SDK handles them directly.
+// Expansion prompts for CLI-only commands (not natively supported by Gemini Core).
+// Core-native commands (/compact, /init, /review) are sent as-is — Core handles them directly.
 const COMMAND_PROMPTS: Record<string, string> = {
   '/doctor': 'Run diagnostic checks on this project. Check system health, dependencies, configuration files, and report any issues.',
-  '/terminal-setup': 'Help me configure my terminal for optimal use with Claude Code. Check current setup and suggest improvements.',
-  '/memory': 'Show the current CLAUDE.md project memory file and help me review or edit it.',
+  '/terminal-setup': 'Help me configure my terminal for optimal use with Gemini CLI. Check current setup and suggest improvements.',
+  '/memory': 'Show the current GEMINI.md project memory file and help me review or edit it.',
 };
 
 const BUILT_IN_COMMANDS: PopoverItem[] = [
@@ -105,7 +105,7 @@ const BUILT_IN_COMMANDS: PopoverItem[] = [
   { label: 'cost', value: '/cost', description: 'Show token usage statistics', builtIn: true, immediate: true, icon: Coins01Icon },
   { label: 'compact', value: '/compact', description: 'Compress conversation context', builtIn: true, icon: FileZipIcon },
   { label: 'doctor', value: '/doctor', description: 'Diagnose project health', builtIn: true, icon: Stethoscope02Icon },
-  { label: 'init', value: '/init', description: 'Initialize CLAUDE.md for project', builtIn: true, icon: FileEditIcon },
+  { label: 'init', value: '/init', description: 'Initialize GEMINI.md for project', builtIn: true, icon: FileEditIcon },
   { label: 'review', value: '/review', description: 'Review code quality', builtIn: true, icon: SearchList01Icon },
   { label: 'terminal-setup', value: '/terminal-setup', description: 'Configure terminal settings', builtIn: true, icon: CommandLineIcon },
   { label: 'memory', value: '/memory', description: 'Edit project memory file', builtIn: true, icon: BrainIcon },
@@ -124,61 +124,12 @@ const MODE_OPTIONS: ModeOption[] = [
   { value: 'ask', label: 'Ask', icon: HelpCircleIcon, description: 'Answer questions only' },
 ];
 
-// Default Claude model options — labels are dynamically overridden by active provider
+// Gemini model options — used directly with Gemini CLI Core
 const DEFAULT_MODEL_OPTIONS = [
-  { value: 'opus', label: 'Opus 4.6' },
-  { value: 'sonnet', label: 'Sonnet 4.5' },
-  { value: 'haiku', label: 'Haiku 4.5' },
+  { value: 'gemini-2.5-pro', label: '2.5 Pro' },
+  { value: 'gemini-2.5-flash', label: '2.5 Flash' },
+  { value: 'gemini-2.0-flash', label: '2.0 Flash' },
 ];
-
-// Provider-specific model label mappings (alias → display name)
-const PROVIDER_MODEL_LABELS: Record<string, Record<string, string>> = {
-  // GLM Coding Plan (Z.AI / 智谱)
-  'https://api.z.ai/api/anthropic': {
-    sonnet: 'GLM-4.7',
-    opus: 'GLM-4.7',
-    haiku: 'GLM-4.5-Air',
-  },
-  'https://open.bigmodel.cn/api/anthropic': {
-    sonnet: 'GLM-4.7',
-    opus: 'GLM-4.7',
-    haiku: 'GLM-4.5-Air',
-  },
-  // Kimi Coding Plan
-  'https://api.kimi.com/coding/': {
-    sonnet: 'Kimi K2.5',
-    opus: 'Kimi K2.5',
-    haiku: 'Kimi K2.5',
-  },
-  // Moonshot Open Platform
-  'https://api.moonshot.ai/anthropic': {
-    sonnet: 'Kimi K2.5',
-    opus: 'Kimi K2.5',
-    haiku: 'Kimi K2.5',
-  },
-  'https://api.moonshot.cn/anthropic': {
-    sonnet: 'Kimi K2.5',
-    opus: 'Kimi K2.5',
-    haiku: 'Kimi K2.5',
-  },
-  // MiniMax Coding Plan
-  'https://api.minimaxi.com/anthropic': {
-    sonnet: 'MiniMax-M2.1',
-    opus: 'MiniMax-M2.1',
-    haiku: 'MiniMax-M2.1',
-  },
-  'https://api.minimax.io/anthropic': {
-    sonnet: 'MiniMax-M2.1',
-    opus: 'MiniMax-M2.1',
-    haiku: 'MiniMax-M2.1',
-  },
-  // OpenRouter — keeps Claude names, provider handles routing
-  'https://openrouter.ai/api': {
-    sonnet: 'Sonnet 4.5',
-    opus: 'Opus 4.6',
-    haiku: 'Haiku 4.5',
-  },
-};
 
 /**
  * Convert a data URL to a FileAttachment object.
@@ -383,31 +334,11 @@ export function MessageInput({
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [badge, setBadge] = useState<CommandBadge | null>(null);
-  const [activeProviderBaseUrl, setActiveProviderBaseUrl] = useState<string | null>(null);
-  const [activeProviderName, setActiveProviderName] = useState<string | null>(null);
-
   // Prompt history state (arrow-up/down to recall previous prompts)
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1); // -1 = not browsing
   const [savedInput, setSavedInput] = useState('');
   const historyNavigatingRef = useRef(false);
-
-  // Fetch active provider to adapt model labels
-  useEffect(() => {
-    fetch('/api/providers')
-      .then((r) => r.json())
-      .then((data) => {
-        const active = (data.providers || []).find((p: { is_active: number }) => p.is_active === 1);
-        if (active) {
-          setActiveProviderBaseUrl(active.base_url || null);
-          setActiveProviderName(active.name || null);
-        } else {
-          setActiveProviderBaseUrl(null);
-          setActiveProviderName(null);
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   // Seed prompt history from existing session messages
   useEffect(() => {
@@ -435,14 +366,8 @@ export function MessageInput({
     hadQueueRef.current = !!hasQueuedMessage;
   }, [isStreaming, hasQueuedMessage]);
 
-  // Compute model options based on active provider
-  const MODEL_OPTIONS = DEFAULT_MODEL_OPTIONS.map((opt) => {
-    if (activeProviderBaseUrl && PROVIDER_MODEL_LABELS[activeProviderBaseUrl]) {
-      const label = PROVIDER_MODEL_LABELS[activeProviderBaseUrl][opt.value];
-      if (label) return { ...opt, label };
-    }
-    return opt;
-  });
+  // Gemini models — used directly, no provider-based relabeling needed
+  const MODEL_OPTIONS = DEFAULT_MODEL_OPTIONS;
 
   // Fetch files for @ mention
   const fetchFiles = useCallback(async (filter: string) => {
@@ -1059,7 +984,7 @@ export function MessageInput({
             <div className="relative">
               <PromptInputTextarea
                 ref={textareaRef}
-                placeholder={hasQueuedMessage ? "Edit queued message..." : badge ? "Add details (optional), then press Enter..." : "Message Claude..."}
+                placeholder={hasQueuedMessage ? "Edit queued message..." : badge ? "Add details (optional), then press Enter..." : "Message Gemini..."}
                 value={inputValue}
                 onChange={(e) => handleInputChange(e.currentTarget.value)}
                 onKeyDown={handleKeyDown}

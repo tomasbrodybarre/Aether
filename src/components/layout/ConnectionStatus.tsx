@@ -17,33 +17,21 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-interface AuthInfo {
+interface GeminiAuth {
   method: string;
-  subscriptionType: string | null;
-  expired: boolean;
-  expiresAt: string | null;
-  providerName?: string;
+  authenticated: boolean;
 }
 
-interface ClaudeStatus {
+interface GeminiStatus {
   connected: boolean;
-  version: string | null;
-  auth: AuthInfo | null;
+  auth: GeminiAuth;
 }
 
-function getAuthLabel(auth: AuthInfo | null): string {
+function getAuthLabel(auth: GeminiAuth | null): string {
   if (!auth) return "";
   switch (auth.method) {
-    case "cli":
-      if (auth.expired) return "Expired";
-      if (auth.subscriptionType === "max") return "Max";
-      if (auth.subscriptionType === "pro") return "Pro";
-      if (auth.subscriptionType) return auth.subscriptionType;
-      return "CLI";
-    case "api_key":
-      return "API Key";
-    case "env":
-      return "Env Key";
+    case "google-oauth":
+      return auth.authenticated ? "Google" : "No Auth";
     case "none":
       return "No Auth";
     default:
@@ -51,29 +39,17 @@ function getAuthLabel(auth: AuthInfo | null): string {
   }
 }
 
-function getAuthColor(auth: AuthInfo | null): { pill: string; dot: string } {
-  if (!auth || auth.method === "none") {
+function getAuthColor(auth: GeminiAuth | null): { pill: string; dot: string } {
+  if (!auth || auth.method === "none" || !auth.authenticated) {
     return {
       pill: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
       dot: "bg-amber-500",
     };
   }
-  if (auth.expired) {
-    return {
-      pill: "bg-red-500/15 text-red-700 dark:text-red-400",
-      dot: "bg-red-500",
-    };
-  }
-  if (auth.method === "cli") {
-    return {
-      pill: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-      dot: "bg-emerald-500",
-    };
-  }
-  // api_key / env
+  // google-oauth authenticated
   return {
-    pill: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-    dot: "bg-blue-500",
+    pill: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
+    dot: "bg-emerald-500",
   };
 }
 
@@ -83,18 +59,18 @@ interface ConnectionStatusProps {
 }
 
 export function ConnectionStatus({ compact = false }: ConnectionStatusProps) {
-  const [status, setStatus] = useState<ClaudeStatus | null>(null);
+  const [status, setStatus] = useState<GeminiStatus | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const checkStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/claude-status");
+      const res = await fetch("/api/gemini-status");
       if (res.ok) {
-        const data: ClaudeStatus = await res.json();
+        const data: GeminiStatus = await res.json();
         setStatus(data);
       }
     } catch {
-      setStatus({ connected: false, version: null, auth: null });
+      setStatus({ connected: false, auth: { method: "none", authenticated: false } });
     }
   }, []);
 
@@ -109,11 +85,11 @@ export function ConnectionStatus({ compact = false }: ConnectionStatusProps) {
   const authLabel = getAuthLabel(auth);
   const authColor = getAuthColor(auth);
 
-  // Combined label: "Connected · Max" or "Disconnected" or "No Auth"
+  // Combined label: "Connected · Google" or "Not Initialized"
   const pillLabel = status === null
     ? "Checking"
     : !connected
-      ? "Disconnected"
+      ? "Not Initialized"
       : authLabel
         ? `Connected · ${authLabel}`
         : "Connected";
@@ -121,13 +97,13 @@ export function ConnectionStatus({ compact = false }: ConnectionStatusProps) {
   const pillColor = status === null
     ? "bg-muted text-muted-foreground"
     : !connected
-      ? "bg-red-500/15 text-red-700 dark:text-red-400"
+      ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
       : authColor.pill;
 
   const dotColor = status === null
     ? "bg-muted-foreground/40"
     : !connected
-      ? "bg-red-500"
+      ? "bg-amber-500"
       : authColor.dot;
 
   return (
@@ -161,23 +137,23 @@ export function ConnectionStatus({ compact = false }: ConnectionStatusProps) {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {connected ? "Claude Code Connected" : "Claude Code Not Connected"}
+              {connected ? "Gemini Core Active" : "Gemini Core Not Initialized"}
             </DialogTitle>
             <DialogDescription>
               {connected
-                ? `Claude Code CLI v${status?.version} is running and ready.`
-                : "Claude Code CLI is required to use this application."}
+                ? "Gemini CLI Core is running in-process and ready."
+                : "Gemini Core initializes on the first message. Send a message to start."}
             </DialogDescription>
           </DialogHeader>
 
           {connected ? (
             <div className="space-y-3 text-sm">
-              {/* CLI status */}
+              {/* Core status */}
               <div className="flex items-center gap-3 rounded-lg bg-emerald-500/10 px-4 py-3">
                 <span className="block h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500" />
                 <div>
                   <p className="font-medium text-emerald-700 dark:text-emerald-400">Active</p>
-                  <p className="text-xs text-muted-foreground">Version {status?.version}</p>
+                  <p className="text-xs text-muted-foreground">In-process Gemini CLI Core</p>
                 </div>
               </div>
 
@@ -185,46 +161,24 @@ export function ConnectionStatus({ compact = false }: ConnectionStatusProps) {
               {auth && (
                 <div className={cn(
                   "flex items-center gap-3 rounded-lg px-4 py-3",
-                  auth.method === "none" ? "bg-amber-500/10" :
-                  auth.expired ? "bg-red-500/10" :
-                  auth.method === "cli" ? "bg-emerald-500/10" : "bg-blue-500/10"
+                  auth.authenticated ? "bg-emerald-500/10" : "bg-amber-500/10"
                 )}>
                   <span className={cn("block h-2.5 w-2.5 shrink-0 rounded-full", dotColor)} />
                   <div className="flex-1 min-w-0">
                     <p className="font-medium">
-                      {auth.method === "cli" && !auth.expired && (
+                      {auth.authenticated ? (
                         <span className="text-emerald-700 dark:text-emerald-400">
-                          {auth.subscriptionType === "max" ? "Max Subscription" : auth.subscriptionType ? `${auth.subscriptionType} Subscription` : "CLI Authenticated"}
+                          Google OAuth Authenticated
                         </span>
-                      )}
-                      {auth.method === "cli" && auth.expired && (
-                        <span className="text-red-700 dark:text-red-400">Token Expired</span>
-                      )}
-                      {auth.method === "api_key" && (
-                        <span className="text-blue-700 dark:text-blue-400">
-                          API Key{auth.providerName ? ` (${auth.providerName})` : ""}
+                      ) : (
+                        <span className="text-amber-700 dark:text-amber-400">
+                          Not Authenticated
                         </span>
-                      )}
-                      {auth.method === "env" && (
-                        <span className="text-blue-700 dark:text-blue-400">Environment Variable</span>
-                      )}
-                      {auth.method === "none" && (
-                        <span className="text-amber-700 dark:text-amber-400">No Authentication</span>
                       )}
                     </p>
-                    {auth.method === "cli" && auth.expiresAt && (
+                    {!auth.authenticated && (
                       <p className="text-xs text-muted-foreground">
-                        {auth.expired ? "Expired" : "Expires"}: {new Date(auth.expiresAt).toLocaleDateString()}
-                      </p>
-                    )}
-                    {auth.method === "none" && (
-                      <p className="text-xs text-muted-foreground">
-                        Run <code className="bg-muted px-1 rounded">claude login</code> to authenticate
-                      </p>
-                    )}
-                    {auth.method === "cli" && auth.expired && (
-                      <p className="text-xs text-muted-foreground">
-                        Run <code className="bg-muted px-1 rounded">claude login</code> to re-authenticate
+                        Authentication is handled automatically on first use via Google login.
                       </p>
                     )}
                   </div>
@@ -233,30 +187,26 @@ export function ConnectionStatus({ compact = false }: ConnectionStatusProps) {
             </div>
           ) : (
             <div className="space-y-4 text-sm">
-              <div className="flex items-center gap-3 rounded-lg bg-red-500/10 px-4 py-3">
-                <span className="block h-2.5 w-2.5 shrink-0 rounded-full bg-red-500" />
-                <p className="font-medium text-red-700 dark:text-red-400">Not detected</p>
+              <div className="flex items-center gap-3 rounded-lg bg-amber-500/10 px-4 py-3">
+                <span className="block h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500" />
+                <p className="font-medium text-amber-700 dark:text-amber-400">Waiting for first message</p>
               </div>
 
               <div>
-                <h4 className="font-medium mb-1.5">1. Install Claude Code</h4>
-                <code className="block rounded-md bg-muted px-3 py-2 text-xs">
-                  npm install -g @anthropic-ai/claude-code
-                </code>
+                <h4 className="font-medium mb-1.5">How it works</h4>
+                <p className="text-xs text-muted-foreground">
+                  Gemini Core runs in-process (no external CLI needed). It initializes
+                  automatically when you send your first message and authenticates via Google
+                  OAuth if needed.
+                </p>
               </div>
 
               <div>
-                <h4 className="font-medium mb-1.5">2. Authenticate</h4>
-                <code className="block rounded-md bg-muted px-3 py-2 text-xs">
-                  claude login
-                </code>
-              </div>
-
-              <div>
-                <h4 className="font-medium mb-1.5">3. Verify Installation</h4>
-                <code className="block rounded-md bg-muted px-3 py-2 text-xs">
-                  claude --version
-                </code>
+                <h4 className="font-medium mb-1.5">Requirements</h4>
+                <ul className="text-xs text-muted-foreground space-y-1 list-disc pl-4">
+                  <li>Node.js 18+ with the <code className="bg-muted px-1 rounded">@google/gemini-cli-core</code> package</li>
+                  <li>A Google account for OAuth authentication</li>
+                </ul>
               </div>
             </div>
           )}

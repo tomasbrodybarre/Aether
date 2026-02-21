@@ -32,18 +32,18 @@ interface SettingsData {
   [key: string]: unknown;
 }
 
-// Structured known fields from ~/.claude/settings.json
+// Structured known fields from ~/.gemini/settings.json
 const KNOWN_FIELDS = [
   {
     key: "permissions",
     label: "Permissions",
-    description: "Configure permission settings for Claude CLI",
+    description: "Configure permission settings for Gemini CLI",
     type: "object" as const,
   },
   {
     key: "env",
     label: "Environment Variables",
-    description: "Environment variables passed to Claude",
+    description: "Environment variables passed to Gemini",
     type: "object" as const,
   },
 ] as const;
@@ -62,7 +62,7 @@ export default function SettingsPage() {
   );
 }
 
-// --- Claude CLI Settings Section (manages ~/.claude/settings.json) ---
+// --- Gemini CLI Settings Section (manages ~/.gemini/settings.json) ---
 function SettingsPageInner() {
   const [settings, setSettings] = useState<SettingsData>({});
   const [originalSettings, setOriginalSettings] = useState<SettingsData>({});
@@ -371,7 +371,7 @@ function SettingsPageInner() {
       <div className="border-b border-border/50 px-6 pt-4 pb-4">
         <h1 className="text-xl font-semibold">Settings</h1>
         <p className="text-sm text-muted-foreground">
-          Manage Aether and Claude CLI settings
+          Manage Aether and Gemini CLI settings
         </p>
       </div>
 
@@ -591,7 +591,7 @@ function SettingsPageInner() {
                   <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Triggers</h3>
                   {([
                     ['explicit_rules', 'Explicit rules', 'User says "always/never do X"'],
-                    ['corrections', 'Corrections', 'User corrects Claude\'s output'],
+                    ['corrections', 'Corrections', 'User corrects Gemini\'s output'],
                     ['error_recovery', 'Error recovery', 'Tool fails, retry with fix succeeds'],
                     ['project_status', 'Project status', 'Project direction or status changes'],
                     ['project_shift', 'Topic shift', 'Scan for lessons when conversation topic changes'],
@@ -894,7 +894,7 @@ function SettingsPageInner() {
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm Save</AlertDialogTitle>
             <AlertDialogDescription>
-              This will overwrite your current ~/.claude/settings.json file. Are
+              This will overwrite your current ~/.gemini/settings.json file. Are
               you sure you want to continue?
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -917,7 +917,7 @@ function SettingsPageInner() {
             <AlertDialogDescription asChild>
               <div className="space-y-2">
                 <p>
-                  This will bypass all permission checks. Claude will be able to
+                  This will bypass all permission checks. Gemini will be able to
                   execute any tool action without asking for your confirmation,
                   including:
                 </p>

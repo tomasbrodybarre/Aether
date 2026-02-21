@@ -349,7 +349,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
                     const statusData = JSON.parse(event.data);
                     if (statusData.session_id) {
                       // Init event — show briefly then clear so tool status can take over
-                      setStatusText(`Connected (${statusData.model || 'claude'})`);
+                      setStatusText(`Connected (${statusData.model || 'gemini'})`);
                       setTimeout(() => setStatusText(undefined), 2000);
                     } else if (statusData.notification) {
                       // Notification from SDK hooks — show as progress
@@ -422,7 +422,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
                         addToast({
                           type: 'info',
                           message: `Memory consolidation needed: ${projects}`,
-                          detail: `${memStatus.threshold}+ observations accumulated. Ask Claude to run a consolidation review.`,
+                          detail: `${memStatus.threshold}+ observations accumulated. Ask Gemini to run a consolidation review.`,
                         });
                       }
                     }).catch(() => { /* silent */ });
@@ -594,7 +594,7 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
           id: 'cmd-' + Date.now(),
           session_id: sessionId,
           role: 'assistant',
-          content: `## Available Commands\n\n### Instant Commands\n- **/help** — Show this help message\n- **/clear** — Clear conversation history\n- **/cost** — Show token usage statistics\n\n### Prompt Commands (shown as badge, add context then send)\n- **/compact** — Compress conversation context\n- **/doctor** — Diagnose project health\n- **/init** — Initialize CLAUDE.md for project\n- **/review** — Review code quality\n- **/terminal-setup** — Configure terminal settings\n- **/memory** — Edit project memory file\n\n### Custom Skills\nSkills from \`~/.claude/commands/\` and project \`.claude/commands/\` are also available via \`/\`.\n\n**Tips:**\n- Type \`/\` to browse commands and skills\n- Type \`@\` to mention files\n- Use Shift+Enter for new line\n- Select a project folder to enable file operations`,
+          content: `## Available Commands\n\n### Instant Commands\n- **/help** — Show this help message\n- **/clear** — Clear conversation history\n- **/cost** — Show token usage statistics\n\n### Prompt Commands (shown as badge, add context then send)\n- **/compact** — Compress conversation context\n- **/doctor** — Diagnose project health\n- **/init** — Initialize GEMINI.md for project\n- **/review** — Review code quality\n- **/terminal-setup** — Configure terminal settings\n- **/memory** — Edit project memory file\n\n### Custom Skills\nSkills from \`~/.gemini/commands/\` and project \`.gemini/commands/\` are also available via \`/\`.\n\n**Tips:**\n- Type \`/\` to browse commands and skills\n- Type \`@\` to mention files\n- Use Shift+Enter for new line\n- Select a project folder to enable file operations`,
           created_at: new Date().toISOString(),
           token_usage: null,
         };

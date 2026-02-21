@@ -74,7 +74,7 @@ export function PluginList({ plugins, onSelect }: PluginListProps) {
               </p>
               <p className="text-xs mt-1">
                 {plugins.length === 0
-                  ? 'Add .md files to ~/.claude/commands/ or .claude/commands/ to create skills'
+                  ? 'Add .md files to ~/.gemini/commands/ or .gemini/commands/ to create skills'
                   : 'Try adjusting your search or filter'}
               </p>
             </div>

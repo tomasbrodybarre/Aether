@@ -18,7 +18,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Aether",
-  description: "A web-based GUI for Claude Code, optimized for scientific workflows",
+  description: "A web-based GUI for Gemini CLI, optimized for scientific workflows",
 };
 
 export default function RootLayout({

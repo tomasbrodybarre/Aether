@@ -35,7 +35,7 @@ export function McpServerList({ servers, onEdit, onDelete }: McpServerListProps)
         <HugeiconsIcon icon={ServerStack01Icon} className="h-10 w-10 mb-3 opacity-50" />
         <p className="text-sm">No MCP servers configured</p>
         <p className="text-xs mt-1">
-          Add an MCP server to extend Claude&apos;s capabilities
+          Add an MCP server to extend Gemini&apos;s capabilities
         </p>
       </div>
     );

@@ -10,7 +10,7 @@ export interface ChatSession {
   model: string;
   system_prompt: string;
   working_directory: string;
-  sdk_session_id: string; // Claude Agent SDK session ID for resume
+  sdk_session_id: string; // Legacy session ID (kept for backward compat)
   project_name: string;
   status: 'active' | 'archived';
   mode?: 'code' | 'plan' | 'ask';

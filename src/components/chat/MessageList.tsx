@@ -59,7 +59,7 @@ export function MessageList({
       <div className="flex flex-1 items-center justify-center">
         <ConversationEmptyState
           title="Aether"
-          description="Start a conversation with Claude. Ask questions, get help with code, or explore ideas."
+          description="Start a conversation with Gemini. Ask questions, get help with code, or explore ideas."
           icon={<Image src="/aether_logo.png" alt="Aether" width={64} height={64} />}
         />
       </div>

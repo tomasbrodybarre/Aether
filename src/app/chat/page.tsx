@@ -245,7 +245,7 @@ export default function NewChatPage() {
                   try {
                     const statusData = JSON.parse(event.data);
                     if (statusData.session_id) {
-                      setStatusText(`Connected (${statusData.model || 'claude'})`);
+                      setStatusText(`Connected (${statusData.model || 'gemini'})`);
                       setTimeout(() => setStatusText(undefined), 2000);
                     } else if (statusData.notification) {
                       setStatusText(statusData.message || statusData.title || undefined);
@@ -346,7 +346,7 @@ export default function NewChatPage() {
           id: 'cmd-' + Date.now(),
           session_id: '',
           role: 'assistant',
-          content: `## Available Commands\n\n- **/help** - Show this help message\n- **/clear** - Clear conversation history\n- **/compact** - Compress conversation context\n- **/cost** - Show token usage statistics\n- **/doctor** - Check system health\n- **/init** - Initialize CLAUDE.md\n- **/review** - Start code review\n- **/terminal-setup** - Configure terminal\n\n**Tips:**\n- Type \`@\` to mention files\n- Use Shift+Enter for new line\n- Select a project folder to enable file operations`,
+          content: `## Available Commands\n\n- **/help** - Show this help message\n- **/clear** - Clear conversation history\n- **/compact** - Compress conversation context\n- **/cost** - Show token usage statistics\n- **/doctor** - Check system health\n- **/init** - Initialize GEMINI.md\n- **/review** - Start code review\n- **/terminal-setup** - Configure terminal\n\n**Tips:**\n- Type \`@\` to mention files\n- Use Shift+Enter for new line\n- Select a project folder to enable file operations`,
           created_at: new Date().toISOString(),
           token_usage: null,
         };

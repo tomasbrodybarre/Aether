@@ -183,7 +183,7 @@ export function ProviderForm({
           <DialogDescription>
             {mode === "edit"
               ? "Update the API provider configuration."
-              : "Configure a new API provider for Claude Code."}
+              : "Configure a new API provider for Gemini."}
           </DialogDescription>
         </DialogHeader>
 
