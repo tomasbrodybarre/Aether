@@ -34,7 +34,7 @@ import type {
   PermissionRequestEvent,
 } from '@/types';
 import { isImageFile } from '@/types';
-import { getSetting } from './db';
+import { getSetting, updateSessionProjectTag } from './db';
 import { processAetherInitDirectives } from './aether-init';
 
 // ---------------------------------------------------------------------------
@@ -304,7 +304,7 @@ export function resolveConfirmation(
 // Aether preamble construction
 // ---------------------------------------------------------------------------
 
-function buildAetherPreamble(): string {
+function buildAetherPreamble(currentProjectTag?: string): string {
   const hostname = os.hostname();
   const platform = os.platform();
   const release = os.release();
@@ -423,7 +423,12 @@ function buildAetherPreamble(): string {
     lines.push(
       '',
       '### Per-turn project tagging',
-      'As you work, mentally track which project each conversation turn relates to. This helps route observations to the correct project file.',
+      `Current project tag: ${currentProjectTag || 'none'}.`,
+      'If the project for this turn differs from the current tag, or if no tag is set,',
+      'emit `<!-- project: TagName -->` at the very start of your response (before any other text).',
+      'Otherwise, do NOT emit any marker — the current tag is correct.',
+      'The marker is invisible in rendered markdown and will be stripped from the saved response.',
+      'Use short, recognizable names matching project files in memory (e.g. "Aether", "Fledgling", "M3T Research").',
       '',
       '### Rules',
       '- Keep observations concise — append a single bullet point to the relevant file',
@@ -730,6 +735,152 @@ function checkMemoryWrite(
 }
 
 // ---------------------------------------------------------------------------
+// Project tag detection transform
+// ---------------------------------------------------------------------------
+
+const TAG_MARKER_RE = /<!--\s*project:\s*(.+?)\s*-->/;
+const TAG_SCAN_LIMIT = 300; // chars of text content to scan before giving up
+
+/**
+ * TransformStream that scans the first ~300 chars of text events for a
+ * `<!-- project: TagName -->` marker. When found:
+ *   1. Strips the marker from the text
+ *   2. Emits a `project_tag` SSE event
+ *   3. Updates the DB with the inferred tag
+ *
+ * When `enabled` is false, acts as a passthrough.
+ */
+export function createTagDetectionTransform(
+  sessionId: string,
+  enabled: boolean,
+): TransformStream<string, string> {
+  if (!enabled) {
+    return new TransformStream(); // passthrough
+  }
+
+  let textSoFar = '';
+  let scanning = true;
+  let bufferedChunks: string[] = [];
+
+  return new TransformStream<string, string>({
+    transform(chunk, controller) {
+      if (!scanning) {
+        controller.enqueue(chunk);
+        return;
+      }
+
+      // Parse SSE lines from chunk to accumulate text content
+      const lines = chunk.split('\n');
+      let hasToolUse = false;
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const event: { type: string; data: string } = JSON.parse(line.slice(6));
+            if (event.type === 'text') {
+              textSoFar += event.data;
+            } else if (event.type === 'tool_use') {
+              hasToolUse = true;
+            }
+          } catch {
+            // skip malformed
+          }
+        }
+      }
+
+      bufferedChunks.push(chunk);
+
+      // Check for marker in accumulated text
+      const match = TAG_MARKER_RE.exec(textSoFar);
+      if (match) {
+        const detectedTag = match[1].trim();
+        scanning = false;
+
+        // Update DB
+        try {
+          updateSessionProjectTag(sessionId, detectedTag, 'inferred');
+        } catch {
+          // best effort
+        }
+
+        // Rebuild buffered chunks with the marker stripped from text events
+        const markerStr = match[0];
+        let stripped = false;
+        for (const buffered of bufferedChunks) {
+          if (!stripped) {
+            // Strip the marker from text events in this chunk
+            const rewritten = _stripMarkerFromChunk(buffered, markerStr);
+            // Prepend the project_tag SSE event
+            const tagEvent = formatSSE({
+              type: 'project_tag' as SSEEvent['type'],
+              data: JSON.stringify({ tag: detectedTag }),
+            });
+            controller.enqueue(tagEvent + rewritten);
+            stripped = true;
+          } else {
+            controller.enqueue(buffered);
+          }
+        }
+        bufferedChunks = [];
+        return;
+      }
+
+      // No marker yet — flush if we've scanned enough text or hit a tool_use
+      if (textSoFar.length >= TAG_SCAN_LIMIT || hasToolUse) {
+        scanning = false;
+        for (const buffered of bufferedChunks) {
+          controller.enqueue(buffered);
+        }
+        bufferedChunks = [];
+        return;
+      }
+
+      // Continue buffering
+    },
+
+    flush(controller) {
+      // Flush any remaining buffered chunks
+      for (const buffered of bufferedChunks) {
+        controller.enqueue(buffered);
+      }
+      bufferedChunks = [];
+    },
+  });
+}
+
+/**
+ * Strip a marker string from text events within an SSE chunk.
+ * Rewrites `data: {"type":"text","data":"...marker..."}` lines.
+ */
+function _stripMarkerFromChunk(chunk: string, marker: string): string {
+  const lines = chunk.split('\n');
+  const result: string[] = [];
+  let markerRemoved = false;
+
+  for (const line of lines) {
+    if (!markerRemoved && line.startsWith('data: ')) {
+      try {
+        const event: { type: string; data: string } = JSON.parse(line.slice(6));
+        if (event.type === 'text' && event.data.includes(marker)) {
+          const cleaned = event.data.replace(marker, '');
+          if (cleaned) {
+            result.push(`data: ${JSON.stringify({ type: 'text', data: cleaned })}`);
+          }
+          // else: entire text event was just the marker — skip the line
+          markerRemoved = true;
+          continue;
+        }
+      } catch {
+        // not parseable, pass through
+      }
+    }
+    result.push(line);
+  }
+
+  return result.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Main streaming function
 // ---------------------------------------------------------------------------
 
@@ -803,7 +954,7 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
         // Build the Aether preamble and inject it into the prompt.
         // Gemini Core loads GEMINI.md natively, but we prepend our
         // Aether-specific instructions as a system context block.
-        const preamble = buildAetherPreamble();
+        const preamble = buildAetherPreamble(options.projectTag);
         const contextParts = [preamble, systemPrompt].filter(Boolean);
 
         // If there's context to inject, prepend it to the prompt

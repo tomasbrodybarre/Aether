@@ -432,6 +432,20 @@ export function ChatView({ sessionId, initialMessages = [], modelName, initialMo
                   break;
                 }
 
+                case 'project_tag': {
+                  try {
+                    const tagData: { tag: string } = JSON.parse(event.data);
+                    // Notify parent components that the session tag has changed
+                    window.dispatchEvent(new CustomEvent('session-updated'));
+                    window.dispatchEvent(new CustomEvent('session-project-tag', {
+                      detail: { tag: tagData.tag, source: 'inferred' },
+                    }));
+                  } catch {
+                    // skip malformed project_tag data
+                  }
+                  break;
+                }
+
                 case 'error': {
                   accumulated += '\n\n**Error:** ' + event.data;
                   accumulatedRef.current = accumulated;

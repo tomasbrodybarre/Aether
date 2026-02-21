@@ -177,16 +177,17 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
   const handleTagChange = useCallback(
     async (sessionId: string, newTag: string | null) => {
       // Optimistically update local state
+      const newSource = newTag !== null ? 'manual' as const : null;
       setSessions((prev) =>
         prev.map((s) =>
-          s.id === sessionId ? { ...s, project_tag: newTag } : s
+          s.id === sessionId ? { ...s, project_tag: newTag, project_tag_source: newSource } : s
         )
       );
       try {
         await fetch(`/api/chat/sessions/${sessionId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ project_tag: newTag }),
+          body: JSON.stringify({ project_tag: newTag, project_tag_source: newSource }),
         });
         // Refresh tags list after change
         fetchProjectTags();
@@ -347,7 +348,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
                       const mode = session.mode || "code";
                       const badgeCfg = MODE_BADGE_CONFIG[mode];
                       const effectiveTag = getEffectiveProjectTag(session);
-                      const isManualTag = !!session.project_tag;
+                      const isManualTag = session.project_tag_source === 'manual';
                       return (
                         <div
                           key={session.id}

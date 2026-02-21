@@ -24,6 +24,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
   const [sessionMode, setSessionMode] = useState<string>('');
   const [sessionProjectName, setSessionProjectName] = useState<string>('');
   const [sessionProjectTag, setSessionProjectTag] = useState<string | null>(null);
+  const [sessionTagSource, setSessionTagSource] = useState<'inferred' | 'manual' | null>(null);
   const [allProjectTags, setAllProjectTags] = useState<string[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitleValue, setEditingTitleValue] = useState('');
@@ -80,6 +81,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
           setSessionMode(data.session.mode || 'code');
           setSessionProjectName(data.session.project_name || '');
           setSessionProjectTag(data.session.project_tag ?? null);
+          setSessionTagSource(data.session.project_tag_source ?? null);
         }
       } catch {
         // Session info load failed - panel will still work without directory
@@ -104,11 +106,16 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
 
   const handleProjectTagChange = useCallback(async (newTag: string | null) => {
     setSessionProjectTag(newTag);
+    setSessionTagSource(newTag !== null ? 'manual' : null);
     try {
       await fetch(`/api/chat/sessions/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_tag: newTag }),
+        body: JSON.stringify({
+          project_tag: newTag,
+          // Manual set → 'manual'; revert (null) → clear source too
+          project_tag_source: newTag !== null ? 'manual' : null,
+        }),
       });
       // Refresh tags list
       const res = await fetch('/api/turns/projects');
@@ -121,6 +128,23 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
       // Best effort
     }
   }, [id]);
+
+  // Listen for LLM-inferred project tag updates from the stream
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { tag: string; source: string };
+      if (detail?.tag) {
+        setSessionProjectTag(detail.tag);
+        setSessionTagSource('inferred');
+        // Refresh tags list
+        fetch('/api/turns/projects').then(r => r.json()).then(data => {
+          setAllProjectTags(data.tags || []);
+        }).catch(() => { /* silent */ });
+      }
+    };
+    window.addEventListener('session-project-tag', handler);
+    return () => window.removeEventListener('session-project-tag', handler);
+  }, []);
 
   useEffect(() => {
     // Reset state when switching sessions
@@ -210,7 +234,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
           {(sessionProjectName || sessionProjectTag) && (
             <ProjectTagEditor
               currentTag={sessionProjectTag || sessionProjectName}
-              isManualOverride={!!sessionProjectTag}
+              isManualOverride={sessionTagSource === 'manual'}
               autoTag={sessionProjectName}
               allTags={allProjectTags}
               onTagChange={handleProjectTagChange}

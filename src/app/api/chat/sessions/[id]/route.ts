@@ -42,7 +42,8 @@ export async function PATCH(
     }
     if ('project_tag' in body) {
       // Explicit null clears the override (reverts to auto-derived project_name)
-      updateSessionProjectTag(id, body.project_tag || null);
+      const source = 'project_tag_source' in body ? body.project_tag_source : undefined;
+      updateSessionProjectTag(id, body.project_tag || null, source);
     }
     if (body.clear_messages) {
       clearSessionMessages(id);

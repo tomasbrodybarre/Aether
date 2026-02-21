@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
-import { streamGemini } from '@/lib/gemini-core';
+import { streamGemini, createTagDetectionTransform } from '@/lib/gemini-core';
 import { addMessage, getSession, updateSessionTitle, getSetting } from '@/lib/db';
 import type { SendMessageRequest, SSEEvent, TokenUsage, MessageContentBlock, FileAttachment } from '@/types';
+import { getEffectiveProjectTag } from '@/types';
 import fs from 'fs';
 import path from 'path';
 
@@ -93,7 +94,10 @@ export async function POST(request: NextRequest) {
       : undefined;
 
     // Stream Gemini response via Core library (in-process, no subprocess)
-    const stream = streamGemini({
+    const effectiveTag = getEffectiveProjectTag(session);
+    const shouldDetectTag = session.project_tag_source !== 'manual';
+
+    const rawStream = streamGemini({
       prompt: content,
       model: effectiveModel,
       systemPrompt: systemPromptOverride || session.system_prompt || undefined,
@@ -101,11 +105,16 @@ export async function POST(request: NextRequest) {
       abortController,
       permissionMode,
       files: fileAttachments,
-      projectTag: session.project_name || undefined,
+      projectTag: effectiveTag || undefined,
     });
 
+    // Pipe through tag detection transform (passthrough when disabled)
+    const taggedStream = rawStream.pipeThrough(
+      createTagDetectionTransform(session_id, shouldDetectTag),
+    );
+
     // Tee the stream: one for client, one for collecting the response
-    const [streamForClient, streamForCollect] = stream.tee();
+    const [streamForClient, streamForCollect] = taggedStream.tee();
 
     // Save assistant message in background
     collectStreamResponse(streamForCollect, session_id);
@@ -126,6 +135,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// Safety-strip any leaked project tag markers from saved text
+const TAG_MARKER_SAFETY_RE = /<!--\s*project:\s*.+?\s*-->/g;
+
 async function collectStreamResponse(stream: ReadableStream<string>, sessionId: string) {
   const reader = stream.getReader();
   const contentBlocks: MessageContentBlock[] = [];
@@ -142,7 +154,7 @@ async function collectStreamResponse(stream: ReadableStream<string>, sessionId: 
         if (line.startsWith('data: ')) {
           try {
             const event: SSEEvent = JSON.parse(line.slice(6));
-            if (event.type === 'permission_request' || event.type === 'tool_output' || event.type === 'memory_observation') {
+            if (event.type === 'permission_request' || event.type === 'tool_output' || event.type === 'memory_observation' || event.type === 'project_tag') {
               // Skip — not saved as message content
             } else if (event.type === 'text') {
               currentText += event.data;
@@ -194,7 +206,8 @@ async function collectStreamResponse(stream: ReadableStream<string>, sessionId: 
       }
     }
 
-    // Flush any remaining text
+    // Flush any remaining text (safety-strip leaked markers)
+    currentText = currentText.replace(TAG_MARKER_SAFETY_RE, '');
     if (currentText.trim()) {
       contentBlocks.push({ type: 'text', text: currentText });
     }

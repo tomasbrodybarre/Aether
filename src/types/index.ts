@@ -12,7 +12,8 @@ export interface ChatSession {
   working_directory: string;
   sdk_session_id: string; // Legacy session ID (kept for backward compat)
   project_name: string;
-  project_tag: string | null; // Manual override for project_name (user-set tag)
+  project_tag: string | null;
+  project_tag_source: 'inferred' | 'manual' | null;
   status: 'active' | 'archived';
   mode?: 'code' | 'plan' | 'ask';
   needs_approval?: boolean;
@@ -318,6 +319,7 @@ export type SSEEventType =
   | 'error'              // error occurred
   | 'permission_request' // permission approval needed
   | 'memory_observation' // memory system: observation detected, show toast
+  | 'project_tag'        // LLM-inferred project tag update
   | 'done';              // stream complete
 
 export interface SSEEvent {

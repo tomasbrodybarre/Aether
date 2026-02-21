@@ -172,6 +172,9 @@ function migrateDb(db: Database.Database): void {
   if (!colNames.includes('project_tag')) {
     db.exec("ALTER TABLE chat_sessions ADD COLUMN project_tag TEXT");
   }
+  if (!colNames.includes('project_tag_source')) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN project_tag_source TEXT");
+  }
 
   const msgColumns = db.prepare("PRAGMA table_info(messages)").all() as { name: string }[];
   const msgColNames = msgColumns.map(c => c.name);
@@ -317,9 +320,17 @@ export function updateSessionMode(id: string, mode: string): void {
   db.prepare('UPDATE chat_sessions SET mode = ? WHERE id = ?').run(mode, id);
 }
 
-export function updateSessionProjectTag(id: string, projectTag: string | null): void {
+export function updateSessionProjectTag(
+  id: string,
+  projectTag: string | null,
+  source?: 'inferred' | 'manual' | null,
+): void {
   const db = getDb();
-  db.prepare('UPDATE chat_sessions SET project_tag = ? WHERE id = ?').run(projectTag, id);
+  if (source !== undefined) {
+    db.prepare('UPDATE chat_sessions SET project_tag = ?, project_tag_source = ? WHERE id = ?').run(projectTag, source, id);
+  } else {
+    db.prepare('UPDATE chat_sessions SET project_tag = ? WHERE id = ?').run(projectTag, id);
+  }
 }
 
 /** Get all distinct project tags from both sessions and turns */
