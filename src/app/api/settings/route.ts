@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 
-const SETTINGS_PATH = path.join(os.homedir(), ".claude", "settings.json");
+const SETTINGS_PATH = path.join(os.homedir(), ".gemini", "settings.json");
 
 function readSettingsFile(): Record<string, unknown> {
   try {

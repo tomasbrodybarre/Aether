@@ -4,12 +4,12 @@ import path from 'path';
 import os from 'os';
 import type { PluginInfo, ErrorResponse, SuccessResponse } from '@/types';
 
-function getClaudeDir(): string {
-  return path.join(os.homedir(), '.claude');
+function getGeminiDir(): string {
+  return path.join(os.homedir(), '.gemini');
 }
 
 function getSettingsPath(): string {
-  return path.join(getClaudeDir(), 'settings.json');
+  return path.join(getGeminiDir(), 'settings.json');
 }
 
 function readSettings(): Record<string, unknown> {
@@ -39,7 +39,7 @@ export async function GET(
   const pluginName = decodeURIComponent(id);
 
   // Check in commands directory
-  const commandsDir = path.join(getClaudeDir(), 'commands');
+  const commandsDir = path.join(getGeminiDir(), 'commands');
   const filePath = path.join(commandsDir, `${pluginName}.md`);
 
   if (fs.existsSync(filePath)) {

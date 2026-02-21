@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSetting, setSetting } from '@/lib/db';
 
 /**
- * CodePilot app-level settings (stored in SQLite, separate from ~/.claude/settings.json).
- * Used for API configuration (ANTHROPIC_AUTH_TOKEN, ANTHROPIC_BASE_URL, etc.)
+ * Aether app-level settings (stored in SQLite, separate from ~/.gemini/settings.json).
+ * Used for API configuration and Aether-specific preferences.
  */
 
 const ALLOWED_KEYS = [

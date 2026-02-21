@@ -5,22 +5,22 @@ import os from "os";
 import crypto from "crypto";
 
 function getGlobalCommandsDir(): string {
-  return path.join(os.homedir(), ".claude", "commands");
+  return path.join(os.homedir(), ".gemini", "commands");
 }
 
 function getProjectCommandsDir(): string {
-  return path.join(process.cwd(), ".claude", "commands");
+  return path.join(process.cwd(), ".gemini", "commands");
 }
 
 function getInstalledSkillsDir(): string {
   return path.join(os.homedir(), ".agents", "skills");
 }
 
-function getClaudeSkillsDir(): string {
-  return path.join(os.homedir(), ".claude", "skills");
+function getGeminiSkillsDir(): string {
+  return path.join(os.homedir(), ".gemini", "skills");
 }
 
-type InstalledSource = "agents" | "claude";
+type InstalledSource = "agents" | "gemini";
 type SkillSource = "global" | "project" | "installed";
 type SkillMatch = {
   filePath: string;
@@ -94,12 +94,12 @@ function countInstalledSkills(dir: string): number {
 
 function getPreferredInstalledSource(): InstalledSource {
   const agentsCount = countInstalledSkills(getInstalledSkillsDir());
-  const claudeCount = countInstalledSkills(getClaudeSkillsDir());
-  return agentsCount === claudeCount
-    ? "claude"
-    : agentsCount > claudeCount
+  const geminiCount = countInstalledSkills(getGeminiSkillsDir());
+  return agentsCount === geminiCount
+    ? "gemini"
+    : agentsCount > geminiCount
       ? "agents"
-      : "claude";
+      : "gemini";
 }
 
 type InstalledMatch = {
@@ -117,8 +117,8 @@ function findInstalledSkillMatches(
   if (!installedSource || installedSource === "agents") {
     dirs.push({ dir: getInstalledSkillsDir(), source: "agents" });
   }
-  if (!installedSource || installedSource === "claude") {
-    dirs.push({ dir: getClaudeSkillsDir(), source: "claude" });
+  if (!installedSource || installedSource === "gemini") {
+    dirs.push({ dir: getGeminiSkillsDir(), source: "gemini" });
   }
 
   for (const { dir, source } of dirs) {
@@ -157,7 +157,7 @@ function findSkillFile(
   const installedSource = options?.installedSource;
 
   if (!options?.installedOnly) {
-    // Check project first, then global, then installed (~/.agents/skills/ and ~/.claude/skills/)
+    // Check project first, then global, then installed (~/.agents/skills/ and ~/.gemini/skills/)
     const projectPath = path.join(getProjectCommandsDir(), `${name}.md`);
     if (fs.existsSync(projectPath)) {
       return { filePath: projectPath, source: "project" };
@@ -212,12 +212,12 @@ export async function GET(
     const url = new URL(_request.url);
     const sourceParam = url.searchParams.get("source");
     const installedSource =
-      sourceParam === "agents" || sourceParam === "claude"
+      sourceParam === "agents" || sourceParam === "gemini"
         ? (sourceParam as InstalledSource)
         : undefined;
     if (sourceParam && !installedSource) {
       return NextResponse.json(
-        { error: "Invalid source; expected 'agents' or 'claude'" },
+        { error: "Invalid source; expected 'agents' or 'gemini'" },
         { status: 400 }
       );
     }
@@ -271,12 +271,12 @@ export async function PUT(
     const url = new URL(request.url);
     const sourceParam = url.searchParams.get("source");
     const installedSource =
-      sourceParam === "agents" || sourceParam === "claude"
+      sourceParam === "agents" || sourceParam === "gemini"
         ? (sourceParam as InstalledSource)
         : undefined;
     if (sourceParam && !installedSource) {
       return NextResponse.json(
-        { error: "Invalid source; expected 'agents' or 'claude'" },
+        { error: "Invalid source; expected 'agents' or 'gemini'" },
         { status: 400 }
       );
     }
@@ -328,12 +328,12 @@ export async function DELETE(
     const url = new URL(_request.url);
     const sourceParam = url.searchParams.get("source");
     const installedSource =
-      sourceParam === "agents" || sourceParam === "claude"
+      sourceParam === "agents" || sourceParam === "gemini"
         ? (sourceParam as InstalledSource)
         : undefined;
     if (sourceParam && !installedSource) {
       return NextResponse.json(
-        { error: "Invalid source; expected 'agents' or 'claude'" },
+        { error: "Invalid source; expected 'agents' or 'gemini'" },
         { status: 400 }
       );
     }

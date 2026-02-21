@@ -17,12 +17,12 @@ export interface SkillsResponse {
   plugins: SkillInfo[];
 }
 
-function getClaudeDir(): string {
-  return path.join(os.homedir(), '.claude');
+function getGeminiDir(): string {
+  return path.join(os.homedir(), '.gemini');
 }
 
 function discoverSkills(): SkillInfo[] {
-  const claudeDir = getClaudeDir();
+  const claudeDir = getGeminiDir();
   const skills: SkillInfo[] = [];
 
   // Scan for .md skill files in global commands directory
@@ -54,8 +54,8 @@ function discoverSkills(): SkillInfo[] {
     }
   }
 
-  // Scan project-level .claude/commands
-  const projectCommandsDir = path.join(process.cwd(), '.claude', 'commands');
+  // Scan project-level .gemini/commands
+  const projectCommandsDir = path.join(process.cwd(), '.gemini', 'commands');
   if (fs.existsSync(projectCommandsDir)) {
     try {
       const files = fs.readdirSync(projectCommandsDir);

@@ -5,7 +5,7 @@ import os from 'os';
 import type { MCPServerConfig, ErrorResponse, SuccessResponse } from '@/types';
 
 function getSettingsPath(): string {
-  return path.join(os.homedir(), '.claude', 'settings.json');
+  return path.join(os.homedir(), '.gemini', 'settings.json');
 }
 
 function readSettings(): Record<string, unknown> {

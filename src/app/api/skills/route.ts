@@ -9,24 +9,24 @@ interface SkillFile {
   description: string;
   content: string;
   source: "global" | "project" | "plugin" | "installed";
-  installedSource?: "agents" | "claude";
+  installedSource?: "agents" | "gemini";
   filePath: string;
 }
 
-type InstalledSource = "agents" | "claude";
+type InstalledSource = "agents" | "gemini";
 type InstalledSkill = SkillFile & { installedSource: InstalledSource; contentHash: string };
 
 function getGlobalCommandsDir(): string {
-  return path.join(os.homedir(), ".claude", "commands");
+  return path.join(os.homedir(), ".gemini", "commands");
 }
 
 function getProjectCommandsDir(cwd?: string): string {
-  return path.join(cwd || process.cwd(), ".claude", "commands");
+  return path.join(cwd || process.cwd(), ".gemini", "commands");
 }
 
 function getPluginCommandsDirs(): string[] {
   const dirs: string[] = [];
-  const marketplacesDir = path.join(os.homedir(), ".claude", "plugins", "marketplaces");
+  const marketplacesDir = path.join(os.homedir(), ".gemini", "plugins", "marketplaces");
   if (!fs.existsSync(marketplacesDir)) return dirs;
 
   try {
@@ -53,8 +53,8 @@ function getInstalledSkillsDir(): string {
   return path.join(os.homedir(), ".agents", "skills");
 }
 
-function getClaudeSkillsDir(): string {
-  return path.join(os.homedir(), ".claude", "skills");
+function getGeminiSkillsDir(): string {
+  return path.join(os.homedir(), ".gemini", "skills");
 }
 
 function computeContentHash(content: string): string {
@@ -112,7 +112,7 @@ function parseSkillFrontMatter(content: string): { name?: string; description?: 
 /**
  * Scan a directory for installed skills.
  * Each skill is a subdirectory containing a SKILL.md with YAML front matter.
- * Used for both ~/.agents/skills/ and ~/.claude/skills/.
+ * Used for both ~/.agents/skills/ and ~/.gemini/skills/.
  */
 function scanInstalledSkills(
   dir: string,
@@ -152,10 +152,10 @@ function scanInstalledSkills(
 
 function resolveInstalledSkills(
   agentsSkills: InstalledSkill[],
-  claudeSkills: InstalledSkill[],
+  geminiSkills: InstalledSkill[],
   preferredSource: InstalledSource
 ): SkillFile[] {
-  const all = [...agentsSkills, ...claudeSkills];
+  const all = [...agentsSkills, ...geminiSkills];
   const byName = new Map<string, InstalledSkill[]>();
   for (const skill of all) {
     const existing = byName.get(skill.name);
@@ -203,7 +203,7 @@ function scanDirectory(
       const fullPath = path.join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        // Recurse into subdirectories (e.g. ~/.claude/commands/review/pr.md)
+        // Recurse into subdirectories (e.g. ~/.gemini/commands/review/pr.md)
         const subPrefix = prefix ? `${prefix}:${entry.name}` : entry.name;
         skills.push(...scanDirectory(fullPath, source, subPrefix));
         continue;
@@ -241,23 +241,23 @@ export async function GET(request: NextRequest) {
     const projectSkills = scanDirectory(projectDir, "project");
 
     const agentsSkillsDir = getInstalledSkillsDir();
-    const claudeSkillsDir = getClaudeSkillsDir();
+    const geminiSkillsDir = getGeminiSkillsDir();
     console.log(`[skills] Scanning installed: ${agentsSkillsDir} (exists: ${fs.existsSync(agentsSkillsDir)})`);
-    console.log(`[skills] Scanning installed: ${claudeSkillsDir} (exists: ${fs.existsSync(claudeSkillsDir)})`);
+    console.log(`[skills] Scanning installed: ${geminiSkillsDir} (exists: ${fs.existsSync(geminiSkillsDir)})`);
     const agentsSkills = scanInstalledSkills(agentsSkillsDir, "agents");
-    const claudeSkills = scanInstalledSkills(claudeSkillsDir, "claude");
+    const geminiSkills = scanInstalledSkills(geminiSkillsDir, "gemini");
     const preferredInstalledSource: InstalledSource =
-      agentsSkills.length === claudeSkills.length
-        ? "claude"
-        : agentsSkills.length > claudeSkills.length
+      agentsSkills.length === geminiSkills.length
+        ? "gemini"
+        : agentsSkills.length > geminiSkills.length
           ? "agents"
-          : "claude";
+          : "gemini";
     console.log(
-      `[skills] Installed counts: agents=${agentsSkills.length}, claude=${claudeSkills.length}, preferred=${preferredInstalledSource}`
+      `[skills] Installed counts: agents=${agentsSkills.length}, gemini=${geminiSkills.length}, preferred=${preferredInstalledSource}`
     );
     const installedSkills = resolveInstalledSkills(
       agentsSkills,
-      claudeSkills,
+      geminiSkills,
       preferredInstalledSource
     );
 

@@ -35,6 +35,7 @@ import type {
 } from '@/types';
 import { isImageFile } from '@/types';
 import { getSetting } from './db';
+import { processAetherInitDirectives } from './aether-init';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -72,6 +73,9 @@ interface PendingConfirmation {
 let config: InstanceType<typeof Config> | null = null;
 let isInitialized = false;
 let initPromise: Promise<void> | null = null;
+
+/** Pre-read file content from aether:init directives — loaded once during init */
+let preReadContent: string = '';
 
 /**
  * Map of pending confirmation requests, keyed by correlationId.
@@ -125,6 +129,17 @@ async function _doInit(targetDir: string): Promise<void> {
   try {
     const cwd = targetDir;
     const model = getSetting('default_model') || 'gemini-2.5-pro';
+
+    // Process aether:init directives from GEMINI.md files.
+    // This runs exec: commands (e.g. git pull) and pre-reads files
+    // for injection into the preamble — BEFORE Core loads GEMINI.md.
+    const initResult = processAetherInitDirectives(cwd);
+    preReadContent = initResult.preReadContent;
+    if (initResult.execCount > 0 || initResult.readCount > 0) {
+      console.log(
+        `[gemini-core] Processed aether:init directives: ${initResult.execCount} exec, ${initResult.readCount} read`,
+      );
+    }
 
     config = new Config({
       sessionId: randomUUID(),
@@ -324,6 +339,24 @@ function buildAetherPreamble(): string {
     '- Use `dpi=150, bbox_inches="tight"` for clean output',
   ];
 
+  // GEMINI.md startup instructions
+  lines.push(
+    '',
+    '## Startup behavior',
+    'If your GEMINI.md contains startup instructions (e.g. "On Startup" section),',
+    'execute them silently without narration, then address the user\'s request directly.',
+  );
+
+  // Pre-read content from aether:init directives
+  if (preReadContent) {
+    lines.push(
+      '',
+      'The files below were pre-loaded per GEMINI.md startup directives — do not re-read them.',
+      'If GEMINI.md references additional startup actions not covered by the pre-loaded content,',
+      'execute them silently.',
+    );
+  }
+
   // Memory system instructions
   const memoryEnabled = getSetting('memory_enabled') !== 'false';
   const memoryRepoPath = getSetting('memory_repo_path') || '';
@@ -353,23 +386,38 @@ function buildAetherPreamble(): string {
       `- \`${normPath}/me.md\` — user profile/communication preferences (rare, only for explicit user statements)`,
       `- \`${normPath}/workflows.md\` — cross-project workflow patterns (rare, only for explicitly stated general rules)`,
       '',
-      '### Triggers (detect these and write observations):',
+      '### Triggers — detect these and write observations:',
     );
 
     if (enabledTriggers.includes('explicit_rules')) {
-      lines.push('- **Explicit rule**: User states "always do X" or "never do Y" — emit immediately');
+      lines.push(
+        '- **Explicit rule**: User states a preference or rule ("always do X", "never do Y", "I prefer...")',
+        '  - Example: User says "Always use type annotations" → append `- Always use type annotations in Python code` to the project file',
+      );
     }
     if (enabledTriggers.includes('corrections')) {
-      lines.push('- **User correction**: User corrects your output (factual, stylistic, or procedural) — emit the correction as a learning');
+      lines.push(
+        '- **User correction**: User corrects your output (factual, stylistic, or procedural)',
+        '  - Example: User says "No, use pnpm not npm" → append `- Package manager: pnpm (not npm)` to the project file',
+      );
     }
     if (enabledTriggers.includes('error_recovery')) {
-      lines.push(`- **Error→recovery cycle**: A tool call fails, you retry with a modified approach, and it succeeds. If the fix is environment-specific (path, shell, OS), emit to \`environments/${envId}.md\``);
+      lines.push(
+        `- **Error→recovery**: A tool call fails, you retry with a different approach, and it succeeds`,
+        `  - Example: \`pip install\` fails, \`pip install --user\` works → append \`- pip requires --user flag on this machine\` to \`environments/${envId}.md\``,
+      );
     }
     if (enabledTriggers.includes('project_status')) {
-      lines.push('- **Project status change**: Project direction, status, or key decision changes — emit to the project file');
+      lines.push(
+        '- **Project status change**: A key decision, milestone, or direction shift occurs',
+        '  - Example: "Let\'s switch from REST to GraphQL" → append `- [2024-02] Migrating API from REST to GraphQL` to the project file',
+      );
     }
     if (enabledTriggers.includes('project_shift')) {
-      lines.push('- **Turn-project shift**: When conversation topic transitions between projects, silently scan the completed block of turns for higher-order lessons and emit any observations before moving on');
+      lines.push(
+        '- **Turn-project shift**: Conversation transitions between projects — scan the completed block for higher-order lessons before moving on',
+        '  - Example: After 10 turns on project A, user switches to B → review A turns for any unrecorded patterns, emit observations, then proceed with B',
+      );
     }
 
     lines.push(
@@ -377,7 +425,7 @@ function buildAetherPreamble(): string {
       '### Per-turn project tagging',
       'As you work, mentally track which project each conversation turn relates to. This helps route observations to the correct project file.',
       '',
-      '### Important',
+      '### Rules',
       '- Keep observations concise — append a single bullet point to the relevant file',
       '- Do NOT write noise — only genuinely learnable moments',
       '- The memory system runs silently. Do not mention memory writes to the user unless asked.',
@@ -389,7 +437,7 @@ function buildAetherPreamble(): string {
     lines.push(
       '',
       '### Consolidation',
-      `When a project file accumulates ${consolidationThreshold}+ observations (bullet points), suggest a consolidation review to the user:`,
+      `When a project file accumulates ${consolidationThreshold}+ observations, suggest a consolidation review:`,
       '"The [project] memory file has accumulated N observations. Would you like me to run a consolidation pass — reviewing observations, promoting generalizable patterns to me.md/workflows.md, and compacting the rest?"',
       'Only suggest this if you notice the file is large when reading it. Do not actively count or poll.',
     );
@@ -401,6 +449,11 @@ function buildAetherPreamble(): string {
         customRules,
       );
     }
+  }
+
+  // Append pre-read content at the end of the preamble
+  if (preReadContent) {
+    lines.push('', preReadContent);
   }
 
   return lines.join('\n');
@@ -870,5 +923,6 @@ export function disposeGeminiCore(): void {
     config = null;
     isInitialized = false;
     initPromise = null;
+    preReadContent = '';
   }
 }
