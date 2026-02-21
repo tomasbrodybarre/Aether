@@ -14,12 +14,20 @@ Gemini CLI (Apache 2.0) has no such restrictions. Fixed-rate subscriptions exist
 - MarkdownImage component for inline figure rendering
 - Content width system, font settings, display preferences
 - Toast notification system
-- Session list UI, editable titles, NavRail
 - Message queueing and interrupt flow
 - Tool action block rendering (collapsible tool calls)
 - Expandable task details (TODO bar → tool correlation)
 - Inline code block editing (when built)
 - Settings pages (Display, Memory — minor key renames)
+
+### Changes (conceptual — session → project-based turns)
+The sidebar changes from a session list to a **project tab** list. Each project tab shows all turns tagged to that project, regardless of when they happened. The old session model was a vestige from OpenCode/Claude Code's subprocess architecture. With Core running in-process, the natural unit is the **turn** (a single user prompt + agent response), not the session.
+
+- **Sidebar = project tabs**: each showing all turns tagged to that project
+- **"Current" workspace**: the active working area where new turns happen
+- **Auto-tagging**: memory system detects project from context and tags turns automatically
+- **Manual tagging**: users can retag turns between projects
+- **No session resume**: instead, the model gets relevant context injected from project memory (GEMINI.md files, memory observations). Each turn starts fresh with rich project context — more robust than session resume, which breaks with context window limits
 
 ### Changes (backend integration layer — ~20% of codebase)
 
@@ -35,7 +43,7 @@ Gemini CLI (Apache 2.0) has no such restrictions. Fixed-rate subscriptions exist
 | `.cmd` wrapper resolution on Windows | Not needed (Core is a library, not a subprocess) |
 | SDK `streamClaude()` API | Core agent loop API (direct function call) |
 | MCP config from `~/.claude/settings.json` | MCP config from `.mcp.json` |
-| Auth via OAuth token (Max subscription) | Auth via API key or Google AI subscription |
+| Auth via OAuth token (Max subscription) | Auth via OAuth (Google) or API key |
 
 ### Removed (no longer needed)
 - Subprocess spawning, stderr buffering, process management
@@ -95,44 +103,85 @@ Key advantage: Core runs in-process. No serialization boundary. Direct access to
 
 ### 1. Agent loop → SSE stream
 
-The Core package exposes the agent loop as an async iterable (or callback-based API — needs verification from source). Each iteration yields an event:
+The Core package exposes the agent loop as an async generator. **Verified in Phase 0 sanity check.**
+
+Entry point: `Config` → `config.initialize()` → `config.refreshAuth(AuthType.LOGIN_WITH_GOOGLE)` → `config.getGeminiClient()` → `client.startChat()` → `client.sendMessageStream()`.
+
+Events yielded: `model_info` → `thought` → `content` → `tool_call_request` → `tool_call_confirmation` → `tool_call_response` → `finished` (with `usageMetadata`).
 
 ```typescript
 // gemini-core.ts (new file, replaces claude-client.ts)
-import { createAgent, type AgentEvent } from '@google/gemini-cli-core';
+import {
+  Config, AuthType, ApprovalMode, PolicyDecision,
+  GeminiEventType, MessageBusType,
+  type ServerGeminiStreamEvent,
+} from '@google/gemini-cli-core';
+import { randomUUID } from 'node:crypto';
 
-export async function* streamGemini(opts: SessionOpts): AsyncGenerator<SSEEvent> {
-  const agent = createAgent({
-    model: opts.model ?? 'gemini-3.1-pro',
-    systemPrompt: await buildSystemPrompt(opts),
-    tools: [...builtinTools, ...mcpTools],
-    sessionId: opts.resumeSessionId,
+// Singleton config — initialized once on server start
+let config: InstanceType<typeof Config>;
+
+export async function initGeminiCore(targetDir: string) {
+  config = new Config({
+    sessionId: randomUUID(),
+    clientVersion: '2.0.0-aether',
+    targetDir,
+    cwd: targetDir,
+    model: 'gemini-2.5-pro',
+    debugMode: false,
+    interactive: false,
+    approvalMode: ApprovalMode.DEFAULT,
   });
+  await config.initialize();
+  await config.refreshAuth(AuthType.LOGIN_WITH_GOOGLE);
 
-  const bus = agent.getMessageBus();
-
-  // Permission routing
-  bus.subscribe('TOOL_CONFIRMATION_REQUEST', (req) => {
-    const decision = localPolicyCheck(req); // fast-path auto-approve
-    if (decision === 'allow') {
-      bus.publish('TOOL_CONFIRMATION_RESPONSE', {
-        correlationId: req.correlationId,
-        confirmed: true,
-      });
-    } else {
-      // Route to web UI
-      yield { type: 'permission', data: req };
-    }
+  // Subscribe to permission requests
+  const bus = config.getMessageBus();
+  bus.subscribe(MessageBusType.TOOL_CONFIRMATION_REQUEST, (req) => {
+    // Policy engine already ran — if we get here, decision was ASK_USER
+    // Forward to web UI via SSE
+    pendingConfirmations.set(req.correlationId, req);
+    emitToClient({ type: 'permission', data: req });
   });
+}
 
-  // Stream events
-  for await (const event of agent.run(opts.prompt)) {
+export async function* streamGemini(
+  prompt: string,
+  signal: AbortSignal
+): AsyncGenerator<SSEEvent> {
+  const client = config.getGeminiClient();
+  const promptId = randomUUID();
+
+  for await (const event of client.sendMessageStream(
+    [{ text: prompt }],
+    signal,
+    promptId
+  )) {
     yield mapEventToSSE(event);
   }
 }
-```
 
-**Note**: exact API shape TBD — needs verification against Core source. The pattern is right; the method names may differ.
+function mapEventToSSE(event: ServerGeminiStreamEvent): SSEEvent {
+  switch (event.type) {
+    case GeminiEventType.Content:
+      return { type: 'assistant', data: { text: event.value } };
+    case GeminiEventType.Thought:
+      return { type: 'thought', data: event.value };
+    case GeminiEventType.ToolCallRequest:
+      return { type: 'tool_use', data: event.value };
+    case GeminiEventType.ToolCallResponse:
+      return { type: 'tool_result', data: event.value };
+    case GeminiEventType.ToolCallConfirmation:
+      return { type: 'permission', data: event.value };
+    case GeminiEventType.Finished:
+      return { type: 'result', data: event.value };
+    case GeminiEventType.Error:
+      return { type: 'error', data: event.value };
+    default:
+      return { type: event.type, data: event.value };
+  }
+}
+```
 
 ### 2. Permission routing
 
@@ -216,22 +265,39 @@ export async function buildSystemPrompt(opts: SessionOpts): string {
 - Use structured JSON format for memory signals (not natural language)
 - Test iteratively; budget 2-3 sessions of prompt engineering
 
-### 4. Session management
+### 4. Turn storage (replaces session management)
+
+**Old model**: sessions = isolated conversations, each with its own history.
+**New model**: turns = individual (prompt, response) pairs, tagged to projects.
 
 ```typescript
-// sessions.ts (adapted from current implementation)
+// Schema change — turns table replaces sessions table
+CREATE TABLE turns (
+  id TEXT PRIMARY KEY,          -- UUID
+  project_tag TEXT,             -- nullable; NULL = untagged/current
+  prompt TEXT NOT NULL,
+  response TEXT,                -- accumulated from streaming
+  model TEXT,                   -- which model was used
+  usage_input INTEGER,
+  usage_output INTEGER,
+  tool_calls INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  duration_ms INTEGER
+);
 
-// Resume: pass session UUID to Core
-const agent = createAgent({ sessionId: existingUuid, ... });
-
-// List: use Core's session listing API or read ~/.gemini/tmp/<hash>/chats/
-const sessions = await listSessions(projectPath);
-
-// New session: omit sessionId, Core generates UUID
-const agent = createAgent({ ... }); // new session
+CREATE INDEX idx_turns_project ON turns(project_tag, created_at DESC);
 ```
 
-Session metadata (titles, project tags, custom fields) stored in Aether's SQLite database as before. Core's session storage handles conversation history and tool results. Aether's SQLite handles UI-layer metadata.
+**Sidebar query**: `SELECT * FROM turns WHERE project_tag = ? ORDER BY created_at DESC`
+**Current workspace**: `SELECT * FROM turns WHERE project_tag IS NULL ORDER BY created_at DESC`
+
+Context injection per turn: instead of resuming a session, each turn starts fresh with:
+1. GEMINI.md (loaded by Core automatically — hierarchical walk)
+2. Aether preamble (capabilities, rendering instructions)
+3. Memory preamble (triggers, consolidation rules)
+4. Recent project observations from memory files
+
+This is more robust than session resume — no context window overflow, no stale history.
 
 ### 5. Memory system
 
@@ -257,11 +323,16 @@ New: Gemini CLI reads `.mcp.json` natively. Aether's Settings > Extensions page 
 
 ## Migration plan
 
-### Phase 0: Verify Core package API (1 day)
-- ~~Determine: can Core be imported as an npm package?~~ YES — `@google/gemini-cli-core` on npm
-- ~~Agent loop API shape?~~ Async generator via `Turn.run()`, yields `ServerGeminiStreamEvent`
-- ~~Confirmation bus pattern?~~ Pub/sub EventEmitter, `TOOL_CONFIRMATION_REQUEST`/`RESPONSE` with correlation IDs
-- Remaining: build a minimal Node.js script that imports Core, runs a prompt, and logs events (sanity check)
+### Phase 0: Verify Core package API ✅ COMPLETE
+- ✅ **Core importable as npm package**: `@google/gemini-cli-core@0.29.5` — 505 packages, all exports present
+- ✅ **Config creation**: `new Config({...})` → `config.initialize()` → `config.refreshAuth(AuthType.LOGIN_WITH_GOOGLE)`
+- ✅ **Auth**: OAuth cached credentials loaded seamlessly (shares auth with Gemini CLI)
+- ✅ **MessageBus**: Available, subscription works (`config.getMessageBus()`)
+- ✅ **Streaming**: `client.sendMessageStream()` returns async generator, events: `model_info` → `thought` → `content` → `finished`
+- ✅ **Event types confirmed**: GeminiEventType enum has Content, Thought, ToolCallRequest, ToolCallResponse, ToolCallConfirmation, Citation, Finished, Error, UserCancelled, Retry, ChatCompressed, LoopDetected, MaxSessionTurns, ContextWindowWillOverflow, ModelInfo, AgentExecutionStopped, AgentExecutionBlocked
+- ✅ **Usage metadata**: comes with Finished event (`promptTokenCount`, `candidatesTokenCount`, `totalTokenCount`)
+- ✅ **Model routing**: automatic routing system visible (`agent-router/override` source)
+- **Sanity check script**: `scripts/sanity-check/test-core-import.mjs`
 
 ### Phase 1: Backend swap (3-5 days)
 - Create `gemini-core.ts` replacing `claude-client.ts`
@@ -298,9 +369,9 @@ New: Gemini CLI reads `.mcp.json` natively. Aether's Settings > Extensions page 
 
 ## Open questions (RESOLVED)
 
-1. **Core package distribution** — **Published to npm** as `@google/gemini-cli-core` (v0.28.2, actively maintained). `npm i @google/gemini-cli-core`. No vendoring needed.
+1. **Core package distribution** — **Published to npm** as `@google/gemini-cli-core` (v0.29.5 as of 2026-02-20). `npm i @google/gemini-cli-core`. Nested inside `@google/gemini-cli` as a dependency. No vendoring needed.
 
-2. **Agent loop API shape** — **Async generator.** The `Turn` class has a `run()` method yielding `ServerGeminiStreamEvent` (discriminated union). Event types: Content (text chunks), Thought (reasoning), ToolCallRequest/Response/Confirmation, UserCancelled, Error, Finished, Retry, ChatCompressed, LoopDetected, MaxSessionTurns, ContextWindowWillOverflow. Integration: `for await (const event of turn.run())`.
+2. **Agent loop API shape** — **Async generator via `GeminiClient.sendMessageStream()`.** Not via `Turn.run()` directly — the client wraps Turn internally. Yields `ServerGeminiStreamEvent` discriminated union with 16+ event types. Integration: `for await (const event of client.sendMessageStream(parts, signal, promptId))`.
 
 3. **Streaming granularity** — **Token-by-token.** `Turn.run()` calls `chat.sendMessageStream()` and iterates chunks, extracting text parts incrementally. RAF throttle will still be needed.
 
@@ -316,9 +387,11 @@ New: Gemini CLI reads `.mcp.json` natively. Aether's Settings > Extensions page 
 
 | Risk | Impact | Likelihood | Mitigation | Status |
 |---|---|---|---|---|
-| Core package API unstable | High | Medium | Pin to specific commit; vendor if needed | Open |
+| Core package API unstable | High | Medium | Pin to specific version; vendor if needed | Open |
 | Instruction-following quality insufficient for memory triggers | Medium | Medium | Simplify triggers; structured JSON signals; few-shot examples | Open |
 | Gemini 3.1 Pro reasoning quality gap on hard agentic tasks | Medium | High (known) | Accept trade-off; mid-session model switching (Q7) helps; monitor model releases | Open |
 | Google policy change restricts wrappers | High | Low | Apache 2.0 is irrevocable; pinned version always available | Open |
-| ~~Core package not importable as library~~ | ~~Medium~~ | ~~Low~~ | Published to npm as `@google/gemini-cli-core` | **Resolved** |
-| ~~Streaming performance different from Claude~~ | ~~Low~~ | ~~Medium~~ | Token-level streaming confirmed (Q3); RAF throttle is model-agnostic | **Resolved** |
+| ~~Core package not importable as library~~ | ~~Medium~~ | ~~Low~~ | v0.29.5 imports cleanly; all exports verified | **Resolved** |
+| ~~Auth requires API key~~ | ~~Medium~~ | ~~Low~~ | OAuth (LOGIN_WITH_GOOGLE) works, shares cached creds with CLI | **Resolved** |
+| ~~Streaming performance different from Claude~~ | ~~Low~~ | ~~Medium~~ | Token-level streaming confirmed; thought events inline with content | **Resolved** |
+| ~~MessageBus not accessible from external code~~ | ~~High~~ | ~~Low~~ | `config.getMessageBus()` exposes full pub/sub API | **Resolved** |

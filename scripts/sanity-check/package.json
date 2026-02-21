@@ -1,0 +1,10 @@
+{
+  "name": "aether-gemini-sanity-check",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "description": "Phase 0 sanity check: verify @google/gemini-cli-core can be imported and used as a library",
+  "dependencies": {
+    "@google/gemini-cli-core": "^0.29.5"
+  }
+}
