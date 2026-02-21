@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server';
-import { resolvePendingPermission } from '@/lib/permission-registry';
+import { resolveConfirmation } from '@/lib/gemini-core';
 import type { PermissionResponseRequest } from '@/types';
-import type { PermissionResult, PermissionUpdate } from '@anthropic-ai/claude-agent-sdk';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,20 +17,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let result: PermissionResult;
-    if (decision.behavior === 'allow') {
-      result = {
-        behavior: 'allow',
-        updatedPermissions: decision.updatedPermissions as unknown as PermissionUpdate[],
-      };
-    } else {
-      result = {
-        behavior: 'deny',
-        message: decision.message || 'User denied permission',
-      };
-    }
-
-    const found = resolvePendingPermission(permissionRequestId, result);
+    const approved = decision.behavior === 'allow';
+    const found = resolveConfirmation(permissionRequestId, approved);
 
     if (!found) {
       return new Response(

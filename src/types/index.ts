@@ -427,13 +427,14 @@ export function formatFileSize(bytes: number): string {
 }
 
 // ==========================================
-// Claude Client Types
+// Client Types (legacy Claude + new Gemini)
 // ==========================================
 
+/** @deprecated Use GeminiStreamOptions instead */
 export interface ClaudeStreamOptions {
   prompt: string;
   sessionId: string;
-  sdkSessionId?: string; // SDK session ID for resuming conversations
+  sdkSessionId?: string;
   model?: string;
   systemPrompt?: string;
   workingDirectory?: string;
@@ -442,4 +443,32 @@ export interface ClaudeStreamOptions {
   permissionMode?: string;
   files?: FileAttachment[];
   toolTimeoutSeconds?: number;
+}
+
+export interface GeminiStreamOptions {
+  prompt: string;
+  workingDirectory?: string;
+  model?: string;
+  systemPrompt?: string;
+  abortController?: AbortController;
+  permissionMode?: string;
+  files?: FileAttachment[];
+  projectTag?: string;
+}
+
+// ==========================================
+// Turn Types (project-based model)
+// ==========================================
+
+export interface TurnRecord {
+  id: string;
+  project_tag: string | null;
+  prompt: string;
+  response: string | null;
+  model: string | null;
+  usage_input: number | null;
+  usage_output: number | null;
+  tool_calls: number;
+  created_at: string;
+  duration_ms: number | null;
 }

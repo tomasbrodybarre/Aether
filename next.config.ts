@@ -6,7 +6,14 @@ const pkg = require("./package.json");
 
 const nextConfig: NextConfig = {
   output: 'standalone',
-  serverExternalPackages: ['better-sqlite3'],
+  serverExternalPackages: [
+    'better-sqlite3',
+    '@google/gemini-cli-core',
+    'web-tree-sitter',
+    '@lydell/node-pty',
+    'node-pty',
+    'keytar',
+  ],
   env: {
     NEXT_PUBLIC_APP_VERSION: pkg.version,
   },

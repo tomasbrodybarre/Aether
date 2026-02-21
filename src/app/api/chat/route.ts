@@ -1,22 +1,9 @@
 import { NextRequest } from 'next/server';
-import { streamClaude } from '@/lib/claude-client';
-import { addMessage, getSession, updateSessionTitle, updateSdkSessionId, getSetting } from '@/lib/db';
-import type { SendMessageRequest, SSEEvent, TokenUsage, MessageContentBlock, FileAttachment, MCPServerConfig } from '@/types';
+import { streamGemini } from '@/lib/gemini-core';
+import { addMessage, getSession, updateSessionTitle, getSetting } from '@/lib/db';
+import type { SendMessageRequest, SSEEvent, TokenUsage, MessageContentBlock, FileAttachment } from '@/types';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
-
-function readMcpServers(): Record<string, MCPServerConfig> {
-  try {
-    const settingsPath = path.join(os.homedir(), '.claude', 'settings.json');
-    if (!fs.existsSync(settingsPath)) return {};
-    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
-    return (settings.mcpServers || {}) as Record<string, MCPServerConfig>;
-  } catch (error) {
-    console.warn('[chat] Failed to load MCP servers:', error instanceof Error ? error.message : String(error));
-    return {};
-  }
-}
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +11,7 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   try {
     const body: SendMessageRequest & { files?: FileAttachment[]; toolTimeout?: number } = await request.json();
-    const { session_id, content, model, mode, files, toolTimeout } = body;
+    const { session_id, content, model, mode, files } = body;
 
     if (!session_id || !content) {
       return new Response(JSON.stringify({ error: 'session_id and content are required' }), {
@@ -45,7 +32,7 @@ export async function POST(request: NextRequest) {
     let savedContent = content;
     if (files && files.length > 0) {
       const workDir = session.working_directory || process.cwd();
-      const uploadDir = path.join(workDir, '.codepilot-uploads');
+      const uploadDir = path.join(workDir, '.aether-uploads');
       if (!fs.existsSync(uploadDir)) {
         fs.mkdirSync(uploadDir, { recursive: true });
       }
@@ -69,7 +56,7 @@ export async function POST(request: NextRequest) {
     // Determine model: request override > session model > default setting
     const effectiveModel = model || session.model || getSetting('default_model') || undefined;
 
-    // Determine permission mode from chat mode: code → acceptEdits, plan → plan, ask → default (no tools)
+    // Determine permission mode from chat mode
     const effectiveMode = mode || session.mode || 'code';
     let permissionMode: string;
     let systemPromptOverride: string | undefined;
@@ -94,7 +81,7 @@ export async function POST(request: NextRequest) {
       abortController.abort();
     });
 
-    // Convert file attachments to the format expected by streamClaude
+    // Convert file attachments to the format expected by streamGemini
     const fileAttachments: FileAttachment[] | undefined = files && files.length > 0
       ? files.map((f, i) => ({
           id: f.id || `file-${Date.now()}-${i}`,
@@ -105,22 +92,16 @@ export async function POST(request: NextRequest) {
         }))
       : undefined;
 
-    // Load MCP server configs from ~/.claude/settings.json (shared with CLI)
-    const mcpServers = readMcpServers();
-
-    // Stream Claude response, using SDK session ID for resume if available
-    const stream = streamClaude({
+    // Stream Gemini response via Core library (in-process, no subprocess)
+    const stream = streamGemini({
       prompt: content,
-      sessionId: session_id,
-      sdkSessionId: session.sdk_session_id || undefined,
       model: effectiveModel,
       systemPrompt: systemPromptOverride || session.system_prompt || undefined,
       workingDirectory: session.working_directory || undefined,
-      mcpServers,
       abortController,
       permissionMode,
       files: fileAttachments,
-      toolTimeoutSeconds: toolTimeout || 120,
+      projectTag: session.project_name || undefined,
     });
 
     // Tee the stream: one for client, one for collecting the response
@@ -162,7 +143,7 @@ async function collectStreamResponse(stream: ReadableStream<string>, sessionId: 
           try {
             const event: SSEEvent = JSON.parse(line.slice(6));
             if (event.type === 'permission_request' || event.type === 'tool_output' || event.type === 'memory_observation') {
-              // Skip permission_request, tool_output, and memory_observation events - not saved as message content
+              // Skip — not saved as message content
             } else if (event.type === 'text') {
               currentText += event.data;
             } else if (event.type === 'tool_use') {
@@ -194,30 +175,18 @@ async function collectStreamResponse(stream: ReadableStream<string>, sessionId: 
               } catch {
                 // skip malformed tool_result data
               }
-            } else if (event.type === 'status') {
-              // Capture SDK session_id from init event and persist it
-              try {
-                const statusData = JSON.parse(event.data);
-                if (statusData.session_id) {
-                  updateSdkSessionId(sessionId, statusData.session_id);
-                }
-              } catch {
-                // skip malformed status data
-              }
             } else if (event.type === 'result') {
               try {
                 const resultData = JSON.parse(event.data);
                 if (resultData.usage) {
                   tokenUsage = resultData.usage;
                 }
-                // Also capture session_id from result if we missed it from init
-                if (resultData.session_id) {
-                  updateSdkSessionId(sessionId, resultData.session_id);
-                }
               } catch {
                 // skip malformed result data
               }
             }
+            // status events: no longer need to capture sdk_session_id
+            // (Gemini Core runs in-process, no subprocess session ID)
           } catch {
             // skip malformed lines
           }

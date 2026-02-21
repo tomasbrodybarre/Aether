@@ -113,6 +113,25 @@ function initDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);
     CREATE INDEX IF NOT EXISTS idx_sessions_updated_at ON chat_sessions(updated_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_session_id ON tasks(session_id);
+
+    -- Turns table: project-based turn model (Gemini migration)
+    -- Each turn is a single (prompt, response) pair tagged to a project.
+    -- Replaces the session model for new conversations.
+    CREATE TABLE IF NOT EXISTS turns (
+      id TEXT PRIMARY KEY,
+      project_tag TEXT,
+      prompt TEXT NOT NULL,
+      response TEXT,
+      model TEXT,
+      usage_input INTEGER,
+      usage_output INTEGER,
+      tool_calls INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      duration_ms INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_turns_project ON turns(project_tag, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_turns_created_at ON turns(created_at DESC);
   `);
 
   // Run migrations for existing databases
@@ -193,6 +212,24 @@ function migrateDb(db: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+  `);
+
+  // Ensure turns table exists for databases created before the Gemini migration
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS turns (
+      id TEXT PRIMARY KEY,
+      project_tag TEXT,
+      prompt TEXT NOT NULL,
+      response TEXT,
+      model TEXT,
+      usage_input INTEGER,
+      usage_output INTEGER,
+      tool_calls INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      duration_ms INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_turns_project ON turns(project_tag, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_turns_created_at ON turns(created_at DESC);
   `);
 
   // Migrate existing settings to a default provider if api_providers is empty
@@ -310,6 +347,97 @@ export function clearSessionMessages(sessionId: string): void {
   db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
   // Reset SDK session ID so next message starts fresh
   db.prepare('UPDATE chat_sessions SET sdk_session_id = ? WHERE id = ?').run('', sessionId);
+}
+
+// ==========================================
+// Turn Operations (project-based turn model)
+// ==========================================
+
+export interface Turn {
+  id: string;
+  project_tag: string | null;
+  prompt: string;
+  response: string | null;
+  model: string | null;
+  usage_input: number | null;
+  usage_output: number | null;
+  tool_calls: number;
+  created_at: string;
+  duration_ms: number | null;
+}
+
+export function createTurn(
+  prompt: string,
+  projectTag?: string | null,
+  model?: string | null,
+): Turn {
+  const db = getDb();
+  const id = crypto.randomBytes(16).toString('hex');
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+
+  db.prepare(
+    'INSERT INTO turns (id, project_tag, prompt, model, created_at) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, projectTag || null, prompt, model || null, now);
+
+  return db.prepare('SELECT * FROM turns WHERE id = ?').get(id) as Turn;
+}
+
+export function updateTurnResponse(
+  id: string,
+  response: string,
+  usageInput?: number | null,
+  usageOutput?: number | null,
+  toolCalls?: number,
+  durationMs?: number | null,
+): void {
+  const db = getDb();
+  db.prepare(
+    'UPDATE turns SET response = ?, usage_input = ?, usage_output = ?, tool_calls = ?, duration_ms = ? WHERE id = ?'
+  ).run(
+    response,
+    usageInput ?? null,
+    usageOutput ?? null,
+    toolCalls ?? 0,
+    durationMs ?? null,
+    id,
+  );
+}
+
+export function getTurn(id: string): Turn | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM turns WHERE id = ?').get(id) as Turn | undefined;
+}
+
+export function getTurnsByProject(projectTag: string | null): Turn[] {
+  const db = getDb();
+  if (projectTag === null) {
+    return db.prepare('SELECT * FROM turns WHERE project_tag IS NULL ORDER BY created_at DESC').all() as Turn[];
+  }
+  return db.prepare('SELECT * FROM turns WHERE project_tag = ? ORDER BY created_at DESC').all(projectTag) as Turn[];
+}
+
+export function getRecentTurns(limit: number = 50): Turn[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM turns ORDER BY created_at DESC LIMIT ?').all(limit) as Turn[];
+}
+
+export function getAllProjectTags(): string[] {
+  const db = getDb();
+  const rows = db.prepare(
+    'SELECT DISTINCT project_tag FROM turns WHERE project_tag IS NOT NULL ORDER BY project_tag ASC'
+  ).all() as { project_tag: string }[];
+  return rows.map(r => r.project_tag);
+}
+
+export function updateTurnProjectTag(id: string, projectTag: string | null): void {
+  const db = getDb();
+  db.prepare('UPDATE turns SET project_tag = ? WHERE id = ?').run(projectTag, id);
+}
+
+export function deleteTurn(id: string): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM turns WHERE id = ?').run(id);
+  return result.changes > 0;
 }
 
 // ==========================================
