@@ -22,11 +22,11 @@ function getGeminiDir(): string {
 }
 
 function discoverSkills(): SkillInfo[] {
-  const claudeDir = getGeminiDir();
+  const geminiDir = getGeminiDir();
   const skills: SkillInfo[] = [];
 
   // Scan for .md skill files in global commands directory
-  const globalCommandsDir = path.join(claudeDir, 'commands');
+  const globalCommandsDir = path.join(geminiDir, 'commands');
   if (fs.existsSync(globalCommandsDir)) {
     try {
       const files = fs.readdirSync(globalCommandsDir);

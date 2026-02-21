@@ -1,7 +1,7 @@
 /**
- * Unit tests for claude-session-parser.ts
+ * Unit tests for legacy-session-parser.ts
  *
- * Tests the JSONL parsing logic for Claude Code CLI session files.
+ * Tests the JSONL parsing logic for legacy CLI session files.
  * Uses Node's built-in test runner (zero dependencies).
  */
 
@@ -12,7 +12,7 @@ import path from 'path';
 import os from 'os';
 
 // We test the parser functions by creating temporary JSONL files
-// that mimic Claude Code's session storage format.
+// that mimic the legacy CLI session storage format.
 
 const TEST_DIR = path.join(os.tmpdir(), `codepilot-test-sessions-${Date.now()}`);
 const PROJECTS_DIR = path.join(TEST_DIR, '.claude', 'projects');
@@ -114,11 +114,11 @@ function makeAssistantEntry(opts: {
 
 // Since the project uses path aliases (@/), we import via a relative path
 // that tsx can resolve with the project's tsconfig.
-const parserPath = path.resolve(__dirname, '../../lib/claude-session-parser.ts');
+const parserPath = path.resolve(__dirname, '../../lib/legacy-session-parser.ts');
 
-describe('claude-session-parser', () => {
+describe('legacy-session-parser', () => {
   // We'll dynamically import the parser module
-  let parser: typeof import('../../lib/claude-session-parser');
+  let parser: typeof import('../../lib/legacy-session-parser');
 
   before(async () => {
     // Set HOME to our test directory so the parser looks for sessions there
@@ -152,18 +152,18 @@ describe('claude-session-parser', () => {
     });
   });
 
-  describe('getClaudeProjectsDir', () => {
+  describe('getLegacyProjectsDir', () => {
     it('should return path under HOME/.claude/projects', () => {
-      const dir = parser.getClaudeProjectsDir();
+      const dir = parser.getLegacyProjectsDir();
       assert.ok(dir.endsWith(path.join('.claude', 'projects')));
     });
   });
 
-  describe('listClaudeSessions', () => {
+  describe('listLegacySessions', () => {
     it('should return empty array when no sessions exist', () => {
       // Projects dir exists but is empty
       fs.mkdirSync(PROJECTS_DIR, { recursive: true });
-      const sessions = parser.listClaudeSessions();
+      const sessions = parser.listLegacySessions();
       assert.equal(sessions.length, 0);
     });
 
@@ -173,7 +173,7 @@ describe('claude-session-parser', () => {
         makeQueueEntry(sessionId),
       ]);
 
-      const sessions = parser.listClaudeSessions();
+      const sessions = parser.listLegacySessions();
       const found = sessions.find(s => s.sessionId === sessionId);
       assert.equal(found, undefined, 'Should skip session with no messages');
     });
@@ -198,7 +198,7 @@ describe('claude-session-parser', () => {
         }),
       ]);
 
-      const sessions = parser.listClaudeSessions();
+      const sessions = parser.listLegacySessions();
       const found = sessions.find(s => s.sessionId === sessionId);
       assert.ok(found, 'Session should be listed');
       assert.equal(found!.projectName, 'myproject');
@@ -232,16 +232,16 @@ describe('claude-session-parser', () => {
         }),
       ]);
 
-      const sessions = parser.listClaudeSessions();
+      const sessions = parser.listLegacySessions();
       const oldIdx = sessions.findIndex(s => s.sessionId === oldSessionId);
       const newIdx = sessions.findIndex(s => s.sessionId === newSessionId);
       assert.ok(newIdx < oldIdx, 'Newer session should come first');
     });
   });
 
-  describe('parseClaudeSession', () => {
+  describe('parseLegacySession', () => {
     it('should return null for non-existent session', () => {
-      const result = parser.parseClaudeSession('non-existent-session-id');
+      const result = parser.parseLegacySession('non-existent-session-id');
       assert.equal(result, null);
     });
 
@@ -263,7 +263,7 @@ describe('claude-session-parser', () => {
         }),
       ]);
 
-      const result = parser.parseClaudeSession(sessionId);
+      const result = parser.parseLegacySession(sessionId);
       assert.ok(result, 'Should return parsed session');
       assert.equal(result!.messages.length, 2);
 
@@ -306,7 +306,7 @@ describe('claude-session-parser', () => {
         }),
       ]);
 
-      const result = parser.parseClaudeSession(sessionId);
+      const result = parser.parseLegacySession(sessionId);
       assert.ok(result);
       assert.equal(result!.messages.length, 2);
 
@@ -354,7 +354,7 @@ describe('claude-session-parser', () => {
         }),
       ]);
 
-      const result = parser.parseClaudeSession(sessionId);
+      const result = parser.parseLegacySession(sessionId);
       assert.ok(result);
 
       const assistantMsg = result!.messages[1];
@@ -404,7 +404,7 @@ describe('claude-session-parser', () => {
         asst2,
       ]);
 
-      const result = parser.parseClaudeSession(sessionId);
+      const result = parser.parseLegacySession(sessionId);
       assert.ok(result);
       assert.equal(result!.messages.length, 4);
       assert.equal(result!.messages[0].role, 'user');
@@ -435,7 +435,7 @@ describe('claude-session-parser', () => {
         }),
       ]);
 
-      const result = parser.parseClaudeSession(sessionId);
+      const result = parser.parseLegacySession(sessionId);
       assert.ok(result);
       // Empty assistant message should be skipped
       assert.equal(result!.messages.length, 1);
@@ -454,7 +454,7 @@ describe('claude-session-parser', () => {
         }),
       ]);
 
-      const sessions = parser.listClaudeSessions();
+      const sessions = parser.listLegacySessions();
       const found = sessions.find(s => s.sessionId === sessionId);
       assert.ok(found);
       assert.equal(found!.preview.length, 120);
@@ -480,7 +480,7 @@ describe('claude-session-parser', () => {
         }),
       ]);
 
-      const result = parser.parseClaudeSession(sessionId);
+      const result = parser.parseLegacySession(sessionId);
       assert.ok(result);
       assert.equal(result!.info.sessionId, sessionId);
       assert.equal(result!.info.cwd, '/home/user/infoproject');
@@ -510,7 +510,7 @@ describe('claude-session-parser', () => {
       ];
       fs.writeFileSync(filePath, lines.join('\n') + '\n');
 
-      const result = parser.parseClaudeSession(sessionId);
+      const result = parser.parseLegacySession(sessionId);
       assert.ok(result, 'Should handle malformed lines gracefully');
       assert.equal(result!.messages.length, 1);
       assert.equal(result!.messages[0].content, 'Valid message after bad line');

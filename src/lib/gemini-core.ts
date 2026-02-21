@@ -1,7 +1,7 @@
 /**
  * gemini-core.ts — Aether v2 backend powered by @google/gemini-cli-core
  *
- * Replaces claude-client.ts. Instead of spawning a CLI subprocess,
+ * Instead of spawning a CLI subprocess,
  * this module imports the Gemini CLI Core library directly and runs
  * the agent loop in-process. Events are mapped to the same SSE
  * format the frontend already understands.
@@ -176,8 +176,8 @@ async function _doInit(targetDir: string): Promise<void> {
 
     // -----------------------------------------------------------------
     // Auto-approve policy rules (user tier 2.x — overrides defaults)
-    // Mirrors the old Claude backend's canUseTool allow-list so common
-    // read-only actions and memory-repo operations don't prompt.
+    // Common read-only actions, file edits, dev tools, and memory-repo
+    // operations are auto-approved to reduce friction.
     // -----------------------------------------------------------------
     _addAutoApproveRules(config);
 
@@ -200,13 +200,17 @@ async function _doInit(targetDir: string): Promise<void> {
  * so these reliably override the built-in ASK_USER defaults for
  * write.toml tools we consider safe in Aether's context.
  *
- * Matches the old Claude backend's canUseTool allow-list:
- *   - All read-only tools (glob, grep_search, list_directory, read_file,
- *     google_web_search) — already allowed by default read-only.toml but
- *     we reinforce at higher priority
- *   - Git operations on memory/skills repos (pull, push, status, etc.)
- *   - save_memory tool (used internally by Gemini Core)
+ * Auto-approved categories:
+ *   - Read-only tools (glob, grep_search, list_directory, read_file,
+ *     google_web_search) — reinforced at higher priority
+ *   - File edits (write_file, replace) — Aether is an IDE
+ *   - Dev tool shell commands (npm, python, cargo, etc.)
+ *   - Safe git operations (status, log, diff, add, commit, etc.)
+ *   - Constructive file ops (mkdir, cp, curl, etc.)
+ *   - Git operations on memory/skills repos
  *   - web_fetch (for web search results)
+ *
+ * Still ASK_USER: rm, git push (non-memory), chmod, sudo, save_memory
  */
 function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   const pe = cfg.getPolicyEngine();
@@ -1239,8 +1243,7 @@ function _stripMarkerFromChunk(chunk: string, marker: string): string {
 
 /**
  * Stream a Gemini response using Core's agent loop.
- * Returns a ReadableStream of SSE-formatted strings — same contract as
- * the old streamClaude() so the chat route can plug it in directly.
+ * Returns a ReadableStream of SSE-formatted strings.
  */
 export function streamGemini(options: GeminiStreamOptions): ReadableStream<string> {
   const {

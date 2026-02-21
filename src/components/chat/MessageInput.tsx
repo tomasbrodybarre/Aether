@@ -77,7 +77,7 @@ interface PopoverItem {
   description?: string;
   builtIn?: boolean;
   immediate?: boolean;
-  installedSource?: "agents" | "claude";
+  installedSource?: "agents" | "gemini";
   icon?: typeof CommandLineIcon;
 }
 
@@ -86,7 +86,7 @@ interface CommandBadge {
   label: string;
   description: string;
   isSkill: boolean;
-  installedSource?: "agents" | "claude";
+  installedSource?: "agents" | "gemini";
 }
 
 type PopoverMode = 'file' | 'skill' | null;
@@ -419,7 +419,7 @@ export function MessageInput({
         const data = await res.json();
         const skills = data.skills || [];
         apiSkills = skills
-          .map((s: { name: string; description: string; source?: string; installedSource?: "agents" | "claude" }) => ({
+          .map((s: { name: string; description: string; source?: string; installedSource?: "agents" | "gemini" }) => ({
             label: s.name,
             value: `/${s.name}`,
             description: s.description || "",
@@ -849,7 +849,7 @@ export function MessageInput({
                 )}
                 {!item.builtIn && item.installedSource && (
                   <span className="text-xs text-muted-foreground shrink-0 ml-auto">
-                    {item.installedSource === 'claude' ? 'Personal' : 'Agents'}
+                    {item.installedSource === 'gemini' ? 'Personal' : 'Agents'}
                   </span>
                 )}
               </button>

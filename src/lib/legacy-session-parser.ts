@@ -1,9 +1,10 @@
 /**
- * Parser for Claude Code CLI session files (.jsonl).
+ * Parser for legacy Claude Code CLI session files (.jsonl).
  *
  * Claude Code stores conversation history as JSONL files in:
  *   ~/.claude/projects/<encoded-project-path>/<session-uuid>.jsonl
  *
+ * Used for importing old sessions into Aether's native turn-based model.
  * Each line is a JSON object with a `type` field:
  *   - "queue-operation": session lifecycle events (dequeue/enqueue)
  *   - "user": user messages with metadata (cwd, git branch, etc.)
@@ -28,7 +29,7 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024;
 // Types for Claude Code JSONL entries
 // ==========================================
 
-export interface ClaudeSessionInfo {
+export interface LegacySessionInfo {
   /** Session UUID (filename without .jsonl) */
   sessionId: string;
   /** Decoded project directory path (best-effort from folder name) */
@@ -39,7 +40,7 @@ export interface ClaudeSessionInfo {
   cwd: string;
   /** Git branch from the first user message */
   gitBranch: string;
-  /** Claude Code version used */
+  /** CLI version used */
   version: string;
   /** First user message preview (truncated) */
   preview: string;
@@ -68,7 +69,7 @@ export interface ParsedMessage {
 }
 
 export interface ParsedSession {
-  info: ClaudeSessionInfo;
+  info: LegacySessionInfo;
   messages: ParsedMessage[];
 }
 
@@ -135,14 +136,14 @@ interface ContentBlock {
 /**
  * Get the Claude Code projects directory.
  */
-export function getClaudeProjectsDir(): string {
+export function getLegacyProjectsDir(): string {
   return path.join(os.homedir(), '.claude', 'projects');
 }
 
 /**
- * Decode a Claude Code project directory name back to a filesystem path.
+ * Decode a legacy project directory name back to a filesystem path.
  *
- * Claude Code encodes absolute paths by replacing each '/' with '-'.
+ * Claude Code encoded absolute paths by replacing each '/' with '-'.
  * e.g., "/root/clawd" → "-root-clawd"
  *
  * NOTE: This is lossy — directory names containing hyphens are ambiguous.
@@ -158,17 +159,17 @@ export function decodeProjectPath(encodedName: string): string {
 }
 
 /**
- * List all available Claude Code CLI sessions.
+ * List all available legacy Claude Code CLI sessions.
  * Scans ~/.claude/projects/ for .jsonl files and extracts metadata.
  */
-export function listClaudeSessions(): ClaudeSessionInfo[] {
-  const projectsDir = getClaudeProjectsDir();
+export function listLegacySessions(): LegacySessionInfo[] {
+  const projectsDir = getLegacyProjectsDir();
 
   if (!fs.existsSync(projectsDir)) {
     return [];
   }
 
-  const sessions: ClaudeSessionInfo[] = [];
+  const sessions: LegacySessionInfo[] = [];
 
   try {
     const projectDirs = fs.readdirSync(projectsDir, { withFileTypes: true });
@@ -217,7 +218,7 @@ export function listClaudeSessions(): ClaudeSessionInfo[] {
 function readJsonlLines(filePath: string): { lines: string[]; stat: fs.Stats } | null {
   const stat = fs.statSync(filePath);
   if (stat.size > MAX_FILE_SIZE) {
-    console.warn(`[claude-session-parser] Skipping ${filePath}: file too large (${(stat.size / 1024 / 1024).toFixed(1)} MB)`);
+    console.warn(`[legacy-session-parser] Skipping ${filePath}: file too large (${(stat.size / 1024 / 1024).toFixed(1)} MB)`);
     return null;
   }
   const content = fs.readFileSync(filePath, 'utf-8');
@@ -232,7 +233,7 @@ function extractSessionInfo(
   filePath: string,
   sessionId: string,
   projectPath: string,
-): ClaudeSessionInfo | null {
+): LegacySessionInfo | null {
   const result = readJsonlLines(filePath);
   if (!result) return null;
   const { lines, stat } = result;
@@ -313,11 +314,11 @@ function extractSessionInfo(
 // ==========================================
 
 /**
- * Fully parse a Claude Code session JSONL file into messages.
+ * Fully parse a legacy session JSONL file into messages.
  * Reads the file once and extracts both metadata and messages in a single pass.
  */
-export function parseClaudeSession(sessionId: string): ParsedSession | null {
-  const projectsDir = getClaudeProjectsDir();
+export function parseLegacySession(sessionId: string): ParsedSession | null {
+  const projectsDir = getLegacyProjectsDir();
 
   if (!fs.existsSync(projectsDir)) return null;
 
@@ -411,7 +412,7 @@ export function parseClaudeSession(sessionId: string): ParsedSession | null {
 
   const effectivePath = cwd || projectPath;
 
-  const info: ClaudeSessionInfo = {
+  const info: LegacySessionInfo = {
     sessionId,
     projectPath: effectivePath,
     projectName: path.basename(effectivePath),

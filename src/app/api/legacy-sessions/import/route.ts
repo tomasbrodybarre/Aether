@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { parseClaudeSession } from '@/lib/claude-session-parser';
+import { parseLegacySession } from '@/lib/legacy-session-parser';
 import { createSession, addMessage, updateSdkSessionId, getAllSessions } from '@/lib/db';
 
 export async function POST(request: NextRequest) {
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const parsed = parseClaudeSession(sessionId);
+    const parsed = parseLegacySession(sessionId);
     if (!parsed) {
       return Response.json(
         { error: `Session "${sessionId}" not found or could not be parsed` },
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       ? firstUserMsg.content.slice(0, 50) + (firstUserMsg.content.length > 50 ? '...' : '')
       : `Imported: ${info.projectName}`;
 
-    // Create a new CodePilot session
+    // Create an Aether session from the legacy data
     const session = createSession(
       title,
       undefined, // model — will use default
@@ -59,13 +59,13 @@ export async function POST(request: NextRequest) {
       'code',
     );
 
-    // Store the original Claude Code SDK session ID so the conversation can be resumed
+    // Store the original SDK session ID so the conversation can be resumed
     updateSdkSessionId(session.id, sessionId);
 
     // Import all messages
     for (const msg of messages) {
       // For assistant messages with tool blocks, store as structured JSON
-      // For text-only messages, store as plain text (consistent with CodePilot's convention)
+      // For text-only messages, store as plain text
       const content = msg.hasToolBlocks
         ? JSON.stringify(msg.contentBlocks)
         : msg.content;
@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.stack || error.message : String(error);
-    console.error('[POST /api/claude-sessions/import] Error:', message);
+    console.error('[POST /api/legacy-sessions/import] Error:', message);
     return Response.json({ error: message }, { status: 500 });
   }
 }

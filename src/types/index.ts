@@ -436,23 +436,8 @@ export function formatFileSize(bytes: number): string {
 }
 
 // ==========================================
-// Client Types (legacy Claude + new Gemini)
+// Client Types
 // ==========================================
-
-/** @deprecated Use GeminiStreamOptions instead */
-export interface ClaudeStreamOptions {
-  prompt: string;
-  sessionId: string;
-  sdkSessionId?: string;
-  model?: string;
-  systemPrompt?: string;
-  workingDirectory?: string;
-  mcpServers?: Record<string, MCPServerConfig>;
-  abortController?: AbortController;
-  permissionMode?: string;
-  files?: FileAttachment[];
-  toolTimeoutSeconds?: number;
-}
 
 export interface GeminiStreamOptions {
   prompt: string;

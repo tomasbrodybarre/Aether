@@ -17,7 +17,7 @@ export interface SkillItem {
   description: string;
   content: string;
   source: "global" | "project" | "plugin" | "installed";
-  installedSource?: "agents" | "claude";
+  installedSource?: "agents" | "gemini";
   filePath: string;
 }
 
