@@ -199,15 +199,15 @@
 
   /* Inline code in assistant messages — gentle red tint (à la Claude app) */
   .is-assistant code:not(pre code) {
-    color: oklch(0.55 0.12 20);
-    background: oklch(0.55 0.12 20 / 8%);
+    color: #CF581D;
+    background: rgb(207 88 29 / 8%);
     padding: 0.15em 0.35em;
     border-radius: 0.25em;
     font-size: 0.875em;
   }
   .dark .is-assistant code:not(pre code) {
-    color: oklch(0.78 0.1 20);
-    background: oklch(0.78 0.1 20 / 12%);
+    color: #e8854e;
+    background: rgb(232 133 78 / 12%);
   }
 }
 
