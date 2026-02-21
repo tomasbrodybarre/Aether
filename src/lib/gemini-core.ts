@@ -282,10 +282,10 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
     'rev-parse', 'branch', 'remote',
   ].join('|');
   const memoryRepoPatterns = [
-    'C:/claude-hub/memory',
-    'C:\\\\claude-hub\\\\memory',
-    'C:/claude-hub/skills',
-    'C:\\\\claude-hub\\\\skills',
+    'C:/agent-hub/memory',
+    'C:\\\\agent-hub\\\\memory',
+    'C:/agent-hub/skills',
+    'C:\\\\agent-hub\\\\skills',
   ].map(p => p.replace(/[/\\]/g, '[\\\\/\\\\\\\\]')).join('|');
 
   pe.addRule({
