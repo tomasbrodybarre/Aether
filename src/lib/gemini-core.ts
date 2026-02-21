@@ -212,8 +212,9 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   const pe = cfg.getPolicyEngine();
   const PRIORITY = 2.5; // User tier, above defaults
   const SOURCE = 'Aether Auto-Approve';
+  let ruleCount = 0;
 
-  // 1. Read-only tools — reinforce at user-tier priority
+  // ── 1. Read-only tools ─────────────────────────────────────────────
   const readOnlyTools = [
     'glob',
     'grep_search',
@@ -228,31 +229,50 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
       priority: PRIORITY,
       source: SOURCE,
     });
+    ruleCount++;
   }
 
-  // 2. save_memory — ASK_USER. Gemini's built-in memory tool writes to
-  //    ~/.gemini/GEMINI.md which is separate from Aether's memory repo
-  //    (C:/claude-hub/memory). Prompt the user so they can gate what
-  //    goes into GEMINI.md vs the memory folder.
-  pe.addRule({
-    toolName: 'save_memory',
-    decision: PolicyDecision.ASK_USER,
-    priority: PRIORITY,
-    source: SOURCE,
-  });
+  // ── 2. Write tools — allow unconditionally ─────────────────────────
+  //    The model's primary editing tools. Aether is an IDE-like
+  //    environment; file writes/edits are expected workflow.
+  for (const toolName of ['write_file', 'replace']) {
+    pe.addRule({
+      toolName,
+      decision: PolicyDecision.ALLOW,
+      priority: PRIORITY,
+      source: `${SOURCE} (file edits)`,
+    });
+    ruleCount++;
+  }
 
-  // 3. web_fetch — for retrieving web content
+  // ── 3. web_fetch — for retrieving web content ──────────────────────
   pe.addRule({
     toolName: 'web_fetch',
     decision: PolicyDecision.ALLOW,
     priority: PRIORITY,
     source: SOURCE,
   });
+  ruleCount++;
 
-  // 4. Shell commands — auto-approve safe git operations on memory/skills repos
-  //    The argsPattern is matched against stableStringify(args), which produces
-  //    something like: {"command":"git -C C:/claude-hub/memory pull"}
-  //    We require -C pointing at known repos for safety.
+  // ── 4. save_memory — ASK_USER ──────────────────────────────────────
+  //    Gemini's built-in memory tool writes to ~/.gemini/GEMINI.md which
+  //    is separate from Aether's memory repo. Prompt the user so they
+  //    can gate what goes into GEMINI.md vs the memory folder.
+  pe.addRule({
+    toolName: 'save_memory',
+    decision: PolicyDecision.ASK_USER,
+    priority: PRIORITY,
+    source: SOURCE,
+  });
+  ruleCount++;
+
+  // ── 5. Shell commands ──────────────────────────────────────────────
+  //    argsPattern is matched against JSON.stringify(args), e.g.:
+  //    {"command":"git status"} or {"command":"npm run dev"}
+  //    Strategy: explicit allowlist of safe command prefixes.
+  //    Anything not matched falls through to default ASK_USER.
+
+  // 5a. Memory/skills git operations (existing)
   const safeGitOps = [
     'pull', 'fetch', 'status', 'log', 'diff', 'add', 'commit', 'push',
     'rev-parse', 'branch', 'remote',
@@ -271,8 +291,80 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
     argsPattern: new RegExp(`git\\s+-C\\s+(${memoryRepoPatterns})\\s+(${safeGitOps})`),
     source: `${SOURCE} (memory/skills git)`,
   });
+  ruleCount++;
 
-  const ruleCount = readOnlyTools.length + 3; // reads + save_memory(deny) + web_fetch + shell
+  // 5b. Read-only shell commands
+  const readOnlyCmds = [
+    'ls', 'dir', 'pwd', 'which', 'where', 'echo', 'cat', 'head', 'tail',
+    'wc', 'sort', 'diff', 'file', 'stat', 'du', 'df', 'env', 'whoami',
+    'hostname', 'uname', 'date', 'tree', 'find', 'type', 'printenv',
+    'realpath', 'dirname', 'basename',
+  ].join('|');
+  pe.addRule({
+    toolName: 'run_shell_command',
+    decision: PolicyDecision.ALLOW,
+    priority: PRIORITY,
+    argsPattern: new RegExp(`"command":"(${readOnlyCmds})[\\s"]`),
+    source: `${SOURCE} (read-only shell)`,
+  });
+  ruleCount++;
+
+  // 5c. Dev tool commands (npm, python, node, etc.)
+  const devToolCmds = [
+    'npm', 'npx', 'node', 'python', 'python3', 'pip', 'pip3',
+    'tsc', 'tsx', 'eslint', 'prettier', 'jest', 'vitest', 'pytest',
+    'cargo', 'go', 'make', 'cmake', 'dotnet', 'java', 'javac', 'mvn',
+    'gradle', 'ruby', 'gem', 'bundle', 'pnpm', 'yarn', 'bun', 'deno',
+  ].join('|');
+  pe.addRule({
+    toolName: 'run_shell_command',
+    decision: PolicyDecision.ALLOW,
+    priority: PRIORITY,
+    argsPattern: new RegExp(`"command":"(${devToolCmds})[\\s"]`),
+    source: `${SOURCE} (dev tools)`,
+  });
+  ruleCount++;
+
+  // 5d. Git operations (read-only + safe local ops)
+  //     Excludes: push (to non-memory repos), reset --hard, clean -f,
+  //     rebase, force-push — those stay ASK_USER.
+  const safeGitSubcmds = [
+    'status', 'log', 'diff', 'branch', 'remote', 'rev-parse', 'show',
+    'blame', 'tag', 'stash', 'config', 'ls-files', 'ls-tree',
+    'shortlog', 'describe', 'cherry', 'reflog',
+    'add', 'commit', 'checkout', 'switch', 'merge', 'fetch', 'pull',
+    'init', 'clone',
+  ].join('|');
+  pe.addRule({
+    toolName: 'run_shell_command',
+    decision: PolicyDecision.ALLOW,
+    priority: PRIORITY,
+    argsPattern: new RegExp(`"command":"git\\s+(${safeGitSubcmds})[\\s"]`),
+    source: `${SOURCE} (git ops)`,
+  });
+  ruleCount++;
+
+  // 5e. Constructive file operations (non-destructive)
+  const constructiveCmds = [
+    'mkdir', 'touch', 'cp', 'mv', 'ln', 'tar', 'zip', 'unzip', 'gzip',
+    'gunzip', 'curl', 'wget',
+  ].join('|');
+  pe.addRule({
+    toolName: 'run_shell_command',
+    decision: PolicyDecision.ALLOW,
+    priority: PRIORITY,
+    argsPattern: new RegExp(`"command":"(${constructiveCmds})[\\s"]`),
+    source: `${SOURCE} (file ops)`,
+  });
+  ruleCount++;
+
+  // ── Stays ASK_USER (falls through to default write.toml) ──────────
+  //    rm, rmdir, del — destructive deletion
+  //    git push (non-memory) — affects remote
+  //    git reset --hard, git clean -f — destructive
+  //    chmod, chown, sudo — permission/privilege escalation
+  //    activate_skill — explicit user action
+
   console.log(`[gemini-core] Added ${ruleCount} auto-approve policy rules`);
 }
 
