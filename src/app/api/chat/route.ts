@@ -2,7 +2,6 @@ import { NextRequest } from 'next/server';
 import { streamGemini, createTagDetectionTransform } from '@/lib/gemini-core';
 import { addMessage, getSession, updateSessionTitle, getSetting } from '@/lib/db';
 import type { SendMessageRequest, SSEEvent, TokenUsage, MessageContentBlock, FileAttachment } from '@/types';
-import { getEffectiveProjectTag } from '@/types';
 import fs from 'fs';
 import path from 'path';
 
@@ -94,7 +93,8 @@ export async function POST(request: NextRequest) {
       : undefined;
 
     // Stream Gemini response via Core library (in-process, no subprocess)
-    const effectiveTag = getEffectiveProjectTag(session);
+    // Only pass real tags (manual or inferred) to the preamble, not working-dir basenames
+    const realTag = session.project_tag || undefined;
     const shouldDetectTag = session.project_tag_source !== 'manual';
 
     const rawStream = streamGemini({
@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
       abortController,
       permissionMode,
       files: fileAttachments,
-      projectTag: effectiveTag || undefined,
+      projectTag: realTag,
     });
 
     // Pipe through tag detection transform (passthrough when disabled)

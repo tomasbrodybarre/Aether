@@ -304,6 +304,26 @@ export function resolveConfirmation(
 // Aether preamble construction
 // ---------------------------------------------------------------------------
 
+/**
+ * Extract known project names from pre-read content (projects.md).
+ * Looks for `## Category: ProjectName` or `## ProjectName` headings.
+ */
+function _extractKnownProjectNames(content: string): string[] {
+  if (!content) return [];
+  const names: string[] = [];
+  // Match ## headings like "## Startup: M3T Research" or "## Aether (formerly ...)"
+  const headingRe = /^##\s+(?:[^:\n]+:\s*)?(.+?)(?:\s*\(.*\))?\s*$/gm;
+  let match;
+  while ((match = headingRe.exec(content)) !== null) {
+    const name = match[1].trim();
+    // Skip meta headings like "# Active Projects"
+    if (name && name !== 'Active Projects') {
+      names.push(name);
+    }
+  }
+  return names;
+}
+
 function buildAetherPreamble(currentProjectTag?: string): string {
   const hostname = os.hostname();
   const platform = os.platform();
@@ -420,15 +440,22 @@ function buildAetherPreamble(currentProjectTag?: string): string {
       );
     }
 
+    // Extract known project names from pre-read content (projects.md headings)
+    const knownProjects = _extractKnownProjectNames(preReadContent);
+    const projectListStr = knownProjects.length > 0
+      ? knownProjects.map(p => `"${p}"`).join(', ')
+      : '"Aether", "Fledgling", "M3T Research"';
+
     lines.push(
       '',
       '### Per-turn project tagging',
       `Current project tag: ${currentProjectTag || 'none'}.`,
+      `Known projects: ${projectListStr}.`,
       'If the project for this turn differs from the current tag, or if no tag is set,',
       'emit `<!-- project: TagName -->` at the very start of your response (before any other text).',
       'Otherwise, do NOT emit any marker — the current tag is correct.',
       'The marker is invisible in rendered markdown and will be stripped from the saved response.',
-      'Use short, recognizable names matching project files in memory (e.g. "Aether", "Fledgling", "M3T Research").',
+      'ONLY use project names from the known projects list above. Do NOT invent new names or use working directory basenames.',
       '',
       '### Rules',
       '- Keep observations concise — append a single bullet point to the relevant file',
