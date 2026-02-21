@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { deleteSession, getSession, updateSessionWorkingDirectory, updateSessionTitle, updateSessionMode, clearSessionMessages } from '@/lib/db';
+import { deleteSession, getSession, updateSessionWorkingDirectory, updateSessionTitle, updateSessionMode, updateSessionProjectTag, clearSessionMessages } from '@/lib/db';
 
 export async function GET(
   _request: NextRequest,
@@ -39,6 +39,10 @@ export async function PATCH(
     }
     if (body.mode) {
       updateSessionMode(id, body.mode);
+    }
+    if ('project_tag' in body) {
+      // Explicit null clears the override (reverts to auto-derived project_name)
+      updateSessionProjectTag(id, body.project_tag || null);
     }
     if (body.clear_messages) {
       clearSessionMessages(id);

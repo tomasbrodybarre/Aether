@@ -169,6 +169,9 @@ function migrateDb(db: Database.Database): void {
   if (!colNames.includes('mode')) {
     db.exec("ALTER TABLE chat_sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'code'");
   }
+  if (!colNames.includes('project_tag')) {
+    db.exec("ALTER TABLE chat_sessions ADD COLUMN project_tag TEXT");
+  }
 
   const msgColumns = db.prepare("PRAGMA table_info(messages)").all() as { name: string }[];
   const msgColNames = msgColumns.map(c => c.name);
@@ -312,6 +315,27 @@ export function updateSessionWorkingDirectory(id: string, workingDirectory: stri
 export function updateSessionMode(id: string, mode: string): void {
   const db = getDb();
   db.prepare('UPDATE chat_sessions SET mode = ? WHERE id = ?').run(mode, id);
+}
+
+export function updateSessionProjectTag(id: string, projectTag: string | null): void {
+  const db = getDb();
+  db.prepare('UPDATE chat_sessions SET project_tag = ? WHERE id = ?').run(projectTag, id);
+}
+
+/** Get all distinct project tags from both sessions and turns */
+export function getAllProjectTagsUnified(): string[] {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT DISTINCT tag FROM (
+      SELECT project_tag AS tag FROM chat_sessions WHERE project_tag IS NOT NULL AND project_tag != ''
+      UNION
+      SELECT project_name AS tag FROM chat_sessions WHERE project_name IS NOT NULL AND project_name != ''
+      UNION
+      SELECT project_tag AS tag FROM turns WHERE project_tag IS NOT NULL AND project_tag != ''
+    )
+    ORDER BY tag ASC
+  `).all() as { tag: string }[];
+  return rows.map(r => r.tag);
 }
 
 // ==========================================

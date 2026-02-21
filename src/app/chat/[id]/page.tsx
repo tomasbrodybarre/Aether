@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useCallback, useRef, use } from 'react';
 import type { Message, MessagesResponse, ChatSession } from '@/types';
+import { getEffectiveProjectTag } from '@/types';
 import { ChatView } from '@/components/chat/ChatView';
+import { ProjectTagEditor } from '@/components/chat/ProjectTagEditor';
 import { HugeiconsIcon } from "@hugeicons/react";
 import { Loading02Icon } from "@hugeicons/core-free-icons";
 import { usePanel } from '@/hooks/usePanel';
@@ -20,6 +22,9 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
   const [sessionTitle, setSessionTitle] = useState<string>('');
   const [sessionModel, setSessionModel] = useState<string>('');
   const [sessionMode, setSessionMode] = useState<string>('');
+  const [sessionProjectName, setSessionProjectName] = useState<string>('');
+  const [sessionProjectTag, setSessionProjectTag] = useState<string | null>(null);
+  const [allProjectTags, setAllProjectTags] = useState<string[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitleValue, setEditingTitleValue] = useState('');
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -73,14 +78,49 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
           setPanelSessionTitle(title);
           setSessionModel(data.session.model || '');
           setSessionMode(data.session.mode || 'code');
+          setSessionProjectName(data.session.project_name || '');
+          setSessionProjectTag(data.session.project_tag ?? null);
         }
       } catch {
         // Session info load failed - panel will still work without directory
       }
     }
 
+    async function loadProjectTags() {
+      try {
+        const res = await fetch('/api/turns/projects');
+        if (res.ok) {
+          const data = await res.json();
+          setAllProjectTags(data.tags || []);
+        }
+      } catch {
+        // Best effort
+      }
+    }
+
     loadSession();
+    loadProjectTags();
   }, [id, setWorkingDirectory, setSessionId, setPanelSessionTitle]);
+
+  const handleProjectTagChange = useCallback(async (newTag: string | null) => {
+    setSessionProjectTag(newTag);
+    try {
+      await fetch(`/api/chat/sessions/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_tag: newTag }),
+      });
+      // Refresh tags list
+      const res = await fetch('/api/turns/projects');
+      if (res.ok) {
+        const data = await res.json();
+        setAllProjectTags(data.tags || []);
+      }
+      window.dispatchEvent(new CustomEvent('session-updated'));
+    } catch {
+      // Best effort
+    }
+  }, [id]);
 
   useEffect(() => {
     // Reset state when switching sessions
@@ -166,7 +206,17 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
             </button>
           )
         )}
-        <div className="flex-1 min-w-0 flex justify-end">
+        <div className="flex-1 min-w-0 flex items-center justify-end gap-2">
+          {(sessionProjectName || sessionProjectTag) && (
+            <ProjectTagEditor
+              currentTag={sessionProjectTag || sessionProjectName}
+              isManualOverride={!!sessionProjectTag}
+              autoTag={sessionProjectName}
+              allTags={allProjectTags}
+              onTagChange={handleProjectTagChange}
+              variant="header"
+            />
+          )}
           <ConnectionStatus />
         </div>
       </div>

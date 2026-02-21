@@ -4,10 +4,23 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Delete02Icon, Search01Icon, Notification02Icon, FileImportIcon } from "@hugeicons/core-free-icons";
+import {
+  Delete02Icon,
+  Search01Icon,
+  Notification02Icon,
+  FileImportIcon,
+  FilterIcon,
+} from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Tooltip,
   TooltipContent,
@@ -15,9 +28,11 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { usePanel } from "@/hooks/usePanel";
+import { ProjectTagEditor } from "@/components/chat/ProjectTagEditor";
 
 import { ImportSessionDialog } from "./ImportSessionDialog";
 import type { ChatSession } from "@/types";
+import { getEffectiveProjectTag } from "@/types";
 
 interface ChatListPanelProps {
   open: boolean;
@@ -70,6 +85,8 @@ const MODE_BADGE_CONFIG = {
   ask: { label: "Ask", className: "bg-green-500/10 text-green-500" },
 } as const;
 
+const ALL_PROJECTS_VALUE = "__all__";
+
 export function ChatListPanel({ open, width }: ChatListPanelProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -79,6 +96,10 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
   const [deletingSession, setDeletingSession] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+
+  // Project filtering
+  const [projectFilter, setProjectFilter] = useState<string>(ALL_PROJECTS_VALUE);
+  const [allProjectTags, setAllProjectTags] = useState<string[]>([]);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -92,9 +113,22 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
     }
   }, []);
 
+  const fetchProjectTags = useCallback(async () => {
+    try {
+      const res = await fetch("/api/turns/projects");
+      if (res.ok) {
+        const data = await res.json();
+        setAllProjectTags(data.tags || []);
+      }
+    } catch {
+      // API may not be available yet
+    }
+  }, []);
+
   useEffect(() => {
     fetchSessions();
-  }, [fetchSessions]);
+    fetchProjectTags();
+  }, [fetchSessions, fetchProjectTags]);
 
   // Refresh session list when navigating
   useEffect(() => {
@@ -103,14 +137,17 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
 
   // Refresh session list when a session is created or updated
   useEffect(() => {
-    const handler = () => fetchSessions();
-    window.addEventListener('session-created', handler);
-    window.addEventListener('session-updated', handler);
-    return () => {
-      window.removeEventListener('session-created', handler);
-      window.removeEventListener('session-updated', handler);
+    const handler = () => {
+      fetchSessions();
+      fetchProjectTags(); // Tags may have changed
     };
-  }, [fetchSessions]);
+    window.addEventListener("session-created", handler);
+    window.addEventListener("session-updated", handler);
+    return () => {
+      window.removeEventListener("session-created", handler);
+      window.removeEventListener("session-updated", handler);
+    };
+  }, [fetchSessions, fetchProjectTags]);
 
   const handleDeleteSession = async (
     e: React.MouseEvent,
@@ -118,7 +155,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
   ) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm('Delete this conversation?')) return;
+    if (!confirm("Delete this conversation?")) return;
     setDeletingSession(sessionId);
     try {
       const res = await fetch(`/api/chat/sessions/${sessionId}`, {
@@ -137,33 +174,85 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
     }
   };
 
-  const filteredSessions = searchQuery
-    ? sessions.filter(
-        (s) =>
-          s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (s.project_name &&
-            s.project_name.toLowerCase().includes(searchQuery.toLowerCase()))
-      )
-    : sessions;
+  const handleTagChange = useCallback(
+    async (sessionId: string, newTag: string | null) => {
+      // Optimistically update local state
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId ? { ...s, project_tag: newTag } : s
+        )
+      );
+      try {
+        await fetch(`/api/chat/sessions/${sessionId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ project_tag: newTag }),
+        });
+        // Refresh tags list after change
+        fetchProjectTags();
+        // Notify other components
+        window.dispatchEvent(new CustomEvent("session-updated"));
+      } catch {
+        // Revert on failure
+        fetchSessions();
+      }
+    },
+    [fetchSessions, fetchProjectTags]
+  );
+
+  // Apply search + project filter
+  const filteredSessions = sessions.filter((s) => {
+    // Text search
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const matchesText =
+        s.title.toLowerCase().includes(q) ||
+        (s.project_name && s.project_name.toLowerCase().includes(q)) ||
+        (s.project_tag && s.project_tag.toLowerCase().includes(q));
+      if (!matchesText) return false;
+    }
+
+    // Project filter
+    if (projectFilter !== ALL_PROJECTS_VALUE) {
+      const effectiveTag = getEffectiveProjectTag(s);
+      if (effectiveTag !== projectFilter) return false;
+    }
+
+    return true;
+  });
 
   const groupedSessions = groupSessionsByDate(filteredSessions);
+
+  // Count sessions per project for the filter dropdown
+  const projectCounts = new Map<string, number>();
+  for (const s of sessions) {
+    const tag = getEffectiveProjectTag(s);
+    if (tag) {
+      projectCounts.set(tag, (projectCounts.get(tag) || 0) + 1);
+    }
+  }
 
   if (!open) return null;
 
   return (
-    <aside className="hidden h-full shrink-0 flex-col overflow-hidden bg-sidebar lg:flex" style={{ width: width ?? 240 }}>
+    <aside
+      className="hidden h-full shrink-0 flex-col overflow-hidden bg-sidebar lg:flex"
+      style={{ width: width ?? 240 }}
+    >
       {/* Header - extra top padding for macOS traffic lights */}
       <div className="flex h-12 shrink-0 items-center justify-between px-3 mt-5 pl-6">
         <span className="text-[0.8125rem] font-semibold tracking-tight text-sidebar-foreground">
           Chats
         </span>
-        {/* Connection status indicator removed — unnecessary for CLI-wrapped architecture */}
       </div>
 
       {/* Search */}
       <div className="px-3 py-2">
         <div className="relative">
-          <HugeiconsIcon icon={Search01Icon} className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+          <HugeiconsIcon
+            icon={Search01Icon}
+            className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground"
+          />
           <Input
             placeholder="Search chats..."
             value={searchQuery}
@@ -172,6 +261,41 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
           />
         </div>
       </div>
+
+      {/* Project filter */}
+      {allProjectTags.length > 0 && (
+        <div className="px-3 pb-2">
+          <Select value={projectFilter} onValueChange={setProjectFilter}>
+            <SelectTrigger
+              size="sm"
+              className="h-7 w-full text-[0.6875rem] gap-1"
+            >
+              <HugeiconsIcon
+                icon={FilterIcon}
+                className="h-3 w-3 shrink-0 text-muted-foreground"
+              />
+              <SelectValue placeholder="All projects" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_PROJECTS_VALUE}>
+                <span className="text-xs">All projects</span>
+              </SelectItem>
+              {allProjectTags.map((tag) => (
+                <SelectItem key={tag} value={tag}>
+                  <span className="text-xs flex items-center gap-1.5">
+                    {tag}
+                    {projectCounts.has(tag) && (
+                      <span className="text-muted-foreground/50">
+                        ({projectCounts.get(tag)})
+                      </span>
+                    )}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {/* Import CLI Session */}
       <div className="px-3 pb-1">
@@ -198,7 +322,9 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
         <div className="flex flex-col pb-3">
           {filteredSessions.length === 0 ? (
             <p className="px-2.5 py-3 text-[0.6875rem] text-muted-foreground/60">
-              {searchQuery ? "No matching chats" : "No conversations yet"}
+              {searchQuery || projectFilter !== ALL_PROJECTS_VALUE
+                ? "No matching chats"
+                : "No conversations yet"}
             </p>
           ) : (
             DATE_GROUP_ORDER.map((group) => {
@@ -214,10 +340,14 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
                       const isActive = pathname === `/chat/${session.id}`;
                       const isHovered = hoveredSession === session.id;
                       const isDeleting = deletingSession === session.id;
-                      const isSessionStreaming = streamingSessionId === session.id;
-                      const needsApproval = pendingApprovalSessionId === session.id;
+                      const isSessionStreaming =
+                        streamingSessionId === session.id;
+                      const needsApproval =
+                        pendingApprovalSessionId === session.id;
                       const mode = session.mode || "code";
                       const badgeCfg = MODE_BADGE_CONFIG[mode];
+                      const effectiveTag = getEffectiveProjectTag(session);
+                      const isManualTag = !!session.project_tag;
                       return (
                         <div
                           key={session.id}
@@ -248,21 +378,37 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
                               {/* Approval reminder */}
                               {needsApproval && (
                                 <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-amber-500/10">
-                                  <HugeiconsIcon icon={Notification02Icon} className="h-2.5 w-2.5 text-amber-500" />
+                                  <HugeiconsIcon
+                                    icon={Notification02Icon}
+                                    className="h-2.5 w-2.5 text-amber-500"
+                                  />
                                 </span>
                               )}
                             </div>
                             <div className="flex items-center gap-1.5 min-w-0">
                               {/* Mode badge */}
-                              <span className={cn("text-[0.5625rem] px-1 py-0.5 rounded font-medium leading-none shrink-0", badgeCfg.className)}>
+                              <span
+                                className={cn(
+                                  "text-[0.5625rem] px-1 py-0.5 rounded font-medium leading-none shrink-0",
+                                  badgeCfg.className
+                                )}
+                              >
                                 {badgeCfg.label}
                               </span>
-                              {session.project_name && (
-                                <span className="truncate text-[0.625rem] text-muted-foreground/50">
-                                  {session.project_name}
-                                </span>
+                              {/* Project tag (editable) */}
+                              {effectiveTag && (
+                                <ProjectTagEditor
+                                  currentTag={effectiveTag}
+                                  isManualOverride={isManualTag}
+                                  autoTag={session.project_name || ""}
+                                  allTags={allProjectTags}
+                                  onTagChange={(tag) =>
+                                    handleTagChange(session.id, tag)
+                                  }
+                                  variant="sidebar"
+                                />
                               )}
-                              {session.project_name && (
+                              {effectiveTag && (
                                 <span className="text-muted-foreground/30 text-[0.625rem]">
                                   ·
                                 </span>
@@ -284,7 +430,10 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
                                   }
                                   disabled={isDeleting}
                                 >
-                                  <HugeiconsIcon icon={Delete02Icon} className="h-3 w-3" />
+                                  <HugeiconsIcon
+                                    icon={Delete02Icon}
+                                    className="h-3 w-3"
+                                  />
                                   <span className="sr-only">
                                     Delete session
                                   </span>

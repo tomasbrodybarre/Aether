@@ -12,9 +12,15 @@ export interface ChatSession {
   working_directory: string;
   sdk_session_id: string; // Legacy session ID (kept for backward compat)
   project_name: string;
+  project_tag: string | null; // Manual override for project_name (user-set tag)
   status: 'active' | 'archived';
   mode?: 'code' | 'plan' | 'ask';
   needs_approval?: boolean;
+}
+
+/** Effective project tag: manual override > auto-derived project_name */
+export function getEffectiveProjectTag(session: ChatSession): string {
+  return session.project_tag || session.project_name || '';
 }
 
 // ==========================================
