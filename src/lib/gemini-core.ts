@@ -1802,6 +1802,15 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
 // ---------------------------------------------------------------------------
 
 /**
+ * Get the BaseLlmClient for stateless, utility-focused LLM calls (no agent loop).
+ * Used for consolidation, summarization, and other one-shot tasks.
+ */
+export function getBaseLlmClient() {
+  if (!config) throw new Error('Gemini Core not initialized');
+  return config.getBaseLlmClient();
+}
+
+/**
  * Check if Gemini Core is initialized and authenticated.
  */
 export function isGeminiReady(): boolean {

@@ -6,9 +6,14 @@ import {
   CheckListIcon,
   Database02Icon,
   RotateClockwiseIcon,
+  Cancel01Icon,
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface MemoryProject {
   name: string;
@@ -26,16 +31,69 @@ interface MemoryStatus {
   consolidation_candidates: string[];
 }
 
+interface CompactionResult {
+  original: string;
+  proposed: string;
+  diff: string;
+  stagingCount: number;
+}
+
 interface WorkspacePanelProps {
   width?: number;
 }
 
+// ---------------------------------------------------------------------------
+// DiffView — lightweight unified diff renderer
+// ---------------------------------------------------------------------------
+
+function DiffView({ diff }: { diff: string }) {
+  const lines = diff.split("\n");
+  // Skip the first 2 lines (--- and +++ headers) if present
+  const startIdx = lines[0]?.startsWith("Index:") || lines[0]?.startsWith("===")
+    ? lines.findIndex((l) => l.startsWith("@@"))
+    : lines[0]?.startsWith("---")
+      ? 2
+      : 0;
+
+  return (
+    <div className="overflow-auto max-h-[50vh] rounded border border-border/30 bg-muted/20">
+      <pre className="text-[0.6875rem] leading-relaxed font-mono p-2 whitespace-pre-wrap break-words">
+        {lines.slice(startIdx).map((line, i) => {
+          let className = "text-muted-foreground/70";
+          if (line.startsWith("@@")) {
+            className = "text-sky-400/60 font-semibold";
+          } else if (line.startsWith("+") && !line.startsWith("+++")) {
+            className = "text-green-400/80 bg-green-400/5";
+          } else if (line.startsWith("-") && !line.startsWith("---")) {
+            className = "text-red-400/80 bg-red-400/5";
+          }
+          return (
+            <div key={i} className={className}>
+              {line || "\u00A0"}
+            </div>
+          );
+        })}
+      </pre>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WorkspacePanel
+// ---------------------------------------------------------------------------
+
 export function WorkspacePanel({ width }: WorkspacePanelProps) {
   const { addToast } = useToast();
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
-  const [loading, setLoading] = useState(false);
   const lastNudgedCountsRef = useRef<Record<string, number>>({});
   const hasNudgedOnMountRef = useRef(false);
+
+  // Compaction flow state
+  const [compacting, setCompacting] = useState<string | null>(null); // project name
+  const [compactingFile, setCompactingFile] = useState<string | null>(null); // file path
+  const [compactionResult, setCompactionResult] = useState<CompactionResult | null>(null);
+  const [compactionError, setCompactionError] = useState<string | null>(null);
+  const [applying, setApplying] = useState(false);
 
   const fetchMemoryStatus = useCallback(async () => {
     try {
@@ -69,7 +127,6 @@ export function WorkspacePanel({ width }: WorkspacePanelProps) {
         });
       }
 
-      // Seed last-nudged counts
       const counts: Record<string, number> = {};
       for (const p of data.projects) {
         counts[p.name] = p.observation_count;
@@ -84,7 +141,6 @@ export function WorkspacePanel({ width }: WorkspacePanelProps) {
       fetchMemoryStatus().then((data) => {
         if (!data) return;
 
-        // Recurring nudge: fire when crossing a 5-observation boundary past threshold
         for (const p of data.projects) {
           const prev = lastNudgedCountsRef.current[p.name] ?? 0;
           const threshold = data.threshold;
@@ -106,33 +162,104 @@ export function WorkspacePanel({ width }: WorkspacePanelProps) {
       });
     };
 
-    // Custom event dispatched when memory_observation SSE arrives
     window.addEventListener("memory-observation", handler);
     return () => window.removeEventListener("memory-observation", handler);
   }, [fetchMemoryStatus, addToast]);
 
+  // --- Compaction handlers ---
+
   const handleConsolidate = useCallback(
-    async (_projectName: string) => {
-      // Placeholder — will be wired to consolidation backend in Phase 2-3
-      setLoading(true);
-      addToast({
-        type: "info",
-        message: "Consolidation not yet implemented",
-        detail: "The consolidation backend will be added in a future phase.",
-      });
-      setLoading(false);
+    async (projectName: string, projectFile: string) => {
+      setCompacting(projectName);
+      setCompactingFile(projectFile);
+      setCompactionResult(null);
+      setCompactionError(null);
+
+      try {
+        const res = await fetch("/api/consolidate/compact", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectFile }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          setCompactionError(data.error || "Compaction failed");
+          return;
+        }
+
+        if (data.noChanges) {
+          setCompacting(null);
+          setCompactingFile(null);
+          addToast({ type: "info", message: `${projectName}: staging is empty, nothing to compact.` });
+          return;
+        }
+
+        setCompactionResult(data);
+      } catch (err) {
+        setCompactionError(err instanceof Error ? err.message : "Network error");
+      }
     },
     [addToast]
   );
 
-  const projectsWithStaging = memoryStatus?.projects.filter(
-    (p) => p.observation_count > 0
-  ) ?? [];
+  const handleApproveCompaction = useCallback(async () => {
+    if (!compactionResult || !compactingFile || !compacting) return;
+    setApplying(true);
+
+    try {
+      const res = await fetch("/api/consolidate/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filePath: compactingFile,
+          content: compactionResult.proposed,
+          commitMessage: `memory: compact ${compacting} staging (${compactionResult.stagingCount} observations)`,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        addToast({
+          type: "success",
+          message: `Compacted ${compacting}: ${compactionResult.stagingCount} observations`,
+          detail: data.gitError ? `Warning: git error — ${data.gitError}` : undefined,
+        });
+      } else {
+        addToast({ type: "info", message: `Apply failed: ${data.error}` });
+      }
+    } catch (err) {
+      addToast({ type: "info", message: `Apply error: ${err instanceof Error ? err.message : "unknown"}` });
+    } finally {
+      // Reset state and refresh counts
+      setCompacting(null);
+      setCompactingFile(null);
+      setCompactionResult(null);
+      setCompactionError(null);
+      setApplying(false);
+      fetchMemoryStatus();
+    }
+  }, [compactionResult, compactingFile, compacting, addToast, fetchMemoryStatus]);
+
+  const handleRejectCompaction = useCallback(() => {
+    setCompacting(null);
+    setCompactingFile(null);
+    setCompactionResult(null);
+    setCompactionError(null);
+  }, []);
+
+  // --- Derived state ---
 
   const totalStaged = memoryStatus?.projects.reduce(
     (sum, p) => sum + p.observation_count,
     0
   ) ?? 0;
+
+  const isCompacting = compacting !== null;
+
+  // --- Render ---
 
   return (
     <aside
@@ -171,77 +298,143 @@ export function WorkspacePanel({ width }: WorkspacePanelProps) {
             <span className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">
               Memory
             </span>
-            {totalStaged > 0 && (
+            {totalStaged > 0 && !isCompacting && (
               <span className="ml-2 text-[0.625rem] font-mono text-amber-400/70 bg-amber-400/10 px-1.5 py-0.5 rounded">
                 {totalStaged}
               </span>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => fetchMemoryStatus()}
-            title="Refresh"
-          >
-            <HugeiconsIcon
-              icon={RotateClockwiseIcon}
-              className="h-3.5 w-3.5"
-            />
-          </Button>
+          {!isCompacting && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => fetchMemoryStatus()}
+              title="Refresh"
+            >
+              <HugeiconsIcon
+                icon={RotateClockwiseIcon}
+                className="h-3.5 w-3.5"
+              />
+            </Button>
+          )}
         </div>
         <div className="flex-1 overflow-auto px-4 pb-4 space-y-2">
-          {!memoryStatus ? (
-            <p className="text-xs text-muted-foreground/40 italic">
-              Loading...
-            </p>
-          ) : !memoryStatus.enabled ? (
-            <p className="text-xs text-muted-foreground/40 italic">
-              Memory system disabled. Enable in Settings &gt; Memory.
-            </p>
-          ) : memoryStatus.projects.length === 0 ? (
-            <p className="text-xs text-muted-foreground/40 italic">
-              No project files found.
-            </p>
-          ) : (
-            <>
-              {memoryStatus.projects.map((project) => (
-                <div
-                  key={project.name}
-                  className="flex items-center justify-between gap-2 py-1"
+          {isCompacting ? (
+            /* ---- Compaction review state ---- */
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-foreground/80">
+                  Compact: {compacting}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={handleRejectCompaction}
+                  title="Cancel"
+                  disabled={applying}
                 >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-xs text-foreground/80 truncate">
-                      {project.name}
-                    </span>
-                    <span
-                      className={`text-[0.625rem] font-mono px-1 py-0.5 rounded ${
-                        project.needs_consolidation
-                          ? "text-amber-400 bg-amber-400/10"
-                          : "text-muted-foreground/40 bg-muted/30"
-                      }`}
-                    >
-                      {project.observation_count}
-                    </span>
-                  </div>
-                  {project.observation_count > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={loading}
-                      onClick={() => handleConsolidate(project.name)}
-                      className="text-[0.625rem] h-6 px-2 shrink-0"
-                    >
-                      Consolidate
-                    </Button>
-                  )}
-                </div>
-              ))}
+                  <HugeiconsIcon icon={Cancel01Icon} className="h-3.5 w-3.5" />
+                </Button>
+              </div>
 
-              {/* Summary line */}
-              {projectsWithStaging.length === 0 && (
-                <p className="text-xs text-muted-foreground/40 italic pt-1">
-                  All staging areas empty.
+              {!compactionResult && !compactionError && (
+                <div className="flex items-center gap-2 py-4">
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                  <span className="text-xs text-muted-foreground/60">
+                    Generating compaction...
+                  </span>
+                </div>
+              )}
+
+              {compactionError && (
+                <div className="rounded border border-red-400/30 bg-red-400/5 px-3 py-2">
+                  <p className="text-xs text-red-400">{compactionError}</p>
+                </div>
+              )}
+
+              {compactionResult && (
+                <>
+                  <p className="text-[0.625rem] text-muted-foreground/60">
+                    {compactionResult.stagingCount} observation{compactionResult.stagingCount !== 1 ? "s" : ""} compacted
+                  </p>
+                  <DiffView diff={compactionResult.diff} />
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      onClick={handleApproveCompaction}
+                      disabled={applying}
+                      className="flex-1 h-7 text-xs bg-green-600 hover:bg-green-700 text-white"
+                    >
+                      {applying ? "Applying..." : "Approve"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRejectCompaction}
+                      disabled={applying}
+                      className="flex-1 h-7 text-xs"
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            /* ---- Idle state: project list ---- */
+            <>
+              {!memoryStatus ? (
+                <p className="text-xs text-muted-foreground/40 italic">
+                  Loading...
                 </p>
+              ) : !memoryStatus.enabled ? (
+                <p className="text-xs text-muted-foreground/40 italic">
+                  Memory system disabled. Enable in Settings &gt; Memory.
+                </p>
+              ) : memoryStatus.projects.length === 0 ? (
+                <p className="text-xs text-muted-foreground/40 italic">
+                  No project files found.
+                </p>
+              ) : (
+                <>
+                  {memoryStatus.projects.map((project) => (
+                    <div
+                      key={project.name}
+                      className="flex items-center justify-between gap-2 py-1"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs text-foreground/80 truncate">
+                          {project.name}
+                        </span>
+                        <span
+                          className={`text-[0.625rem] font-mono px-1 py-0.5 rounded ${
+                            project.needs_consolidation
+                              ? "text-amber-400 bg-amber-400/10"
+                              : "text-muted-foreground/40 bg-muted/30"
+                          }`}
+                        >
+                          {project.observation_count}
+                        </span>
+                      </div>
+                      {project.observation_count > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleConsolidate(project.name, project.file)}
+                          className="text-[0.625rem] h-6 px-2 shrink-0"
+                        >
+                          Consolidate
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+
+                  {memoryStatus.projects.every((p) => p.observation_count === 0) && (
+                    <p className="text-xs text-muted-foreground/40 italic pt-1">
+                      All staging areas empty.
+                    </p>
+                  )}
+                </>
               )}
             </>
           )}
