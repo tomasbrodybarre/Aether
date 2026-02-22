@@ -1751,11 +1751,13 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
           }));
         }
 
-        // Stream complete
+        // Stream complete — mark model as healthy
+        setModelHealthOk();
         controller.enqueue(formatSSE({ type: 'done', data: '' }));
         controller.close();
       } catch (error) {
         const rawMessage = error instanceof Error ? error.message : 'Unknown error';
+        setModelHealthError(rawMessage);
         console.error('[gemini-core] Stream error:', rawMessage);
         // Log full error details for network error diagnosis
         if (error instanceof Error) {
@@ -1850,6 +1852,36 @@ export function getGeminiAuthInfo(): { authenticated: boolean; method: string } 
   }
   const method = process.env.GEMINI_API_KEY ? 'api-key' : 'google-oauth';
   return { authenticated: true, method };
+}
+
+// ---------------------------------------------------------------------------
+// Model health tracking — reflects actual model responsiveness
+// ---------------------------------------------------------------------------
+
+interface ModelHealth {
+  /** idle = no requests yet, ok = last request succeeded, error = last request failed */
+  status: 'idle' | 'ok' | 'error';
+  /** Error message from the most recent failure */
+  error?: string;
+  /** Timestamp of last status change (ms since epoch) */
+  timestamp: number;
+}
+
+let modelHealth: ModelHealth = { status: 'idle', timestamp: Date.now() };
+
+function setModelHealthOk() {
+  modelHealth = { status: 'ok', timestamp: Date.now() };
+}
+
+function setModelHealthError(error: string) {
+  modelHealth = { status: 'error', error, timestamp: Date.now() };
+}
+
+/**
+ * Get the current model health for the connection status UI.
+ */
+export function getModelHealth(): ModelHealth {
+  return { ...modelHealth };
 }
 
 /**
