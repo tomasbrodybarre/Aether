@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback, use } from 'react';
 import type { TurnRecord } from '@/types';
 import { ProjectFeedView } from '@/components/chat/ProjectFeedView';
 import { ProjectTagEditor } from '@/components/chat/ProjectTagEditor';
-import { Button } from '@/components/ui/button';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Loading02Icon } from '@hugeicons/core-free-icons';
 import { usePanel } from '@/hooks/usePanel';
@@ -110,27 +109,6 @@ export default function ProjectPage({ params }: ProjectPageProps) {
     }
   }, [turns, setWorkingDirectory]);
 
-  const [consolidating, setConsolidating] = useState(false);
-
-  const handleConsolidate = useCallback(async () => {
-    if (isTimeline || isUntagged || isLegacyCurrent || consolidating) return;
-    setConsolidating(true);
-    try {
-      const res = await fetch('/api/memory/consolidate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectName: decodedTag }),
-      });
-      if (!res.ok) {
-        console.error('Consolidation failed:', await res.text());
-      }
-    } catch (err) {
-      console.error('Consolidation error:', err);
-    } finally {
-      setConsolidating(false);
-    }
-  }, [isTimeline, isUntagged, isLegacyCurrent, decodedTag, consolidating]);
-
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -162,26 +140,16 @@ export default function ProjectPage({ params }: ProjectPageProps) {
         </span>
         <div className="flex-1 min-w-0 flex items-center justify-end gap-2">
           {isProjectView && (
-            <>
-              <ProjectTagEditor
-                currentTag={decodedTag}
-                isManualOverride={false}
-                autoTag=""
-                allTags={allProjectTags}
-                onTagChange={() => {
-                  // Tag rename would be a bulk operation — for now, show as read-only
-                }}
-                variant="header"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleConsolidate}
-                disabled={consolidating}
-              >
-                {consolidating ? 'Consolidating...' : 'Consolidate Memory'}
-              </Button>
-            </>
+            <ProjectTagEditor
+              currentTag={decodedTag}
+              isManualOverride={false}
+              autoTag=""
+              allTags={allProjectTags}
+              onTagChange={() => {
+                // Tag rename would be a bulk operation — for now, show as read-only
+              }}
+              variant="header"
+            />
           )}
           <ConnectionStatus />
         </div>
