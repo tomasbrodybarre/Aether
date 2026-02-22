@@ -61,8 +61,23 @@ async function handleTurnFlow(
   const effectiveModel = model || getSetting('default_model') || 'gemini-3-pro';
   const workDir = working_directory || getSetting('default_working_directory') || process.cwd();
 
+  // Tag inheritance: when no explicit tag is provided (e.g. Timeline page),
+  // inherit from the most recent turn. This provides continuity — if the user
+  // was just discussing Aether, the next turn is likely also about Aether.
+  // The model can still override via the <!-- project: X --> marker.
+  let effectiveTag = project_tag;
+  let tagInherited = false;
+  if (!effectiveTag) {
+    const recent = getRecentTurnContext(1);
+    if (recent.length > 0 && recent[0].project_tag) {
+      effectiveTag = recent[0].project_tag;
+      tagInherited = true;
+      console.log(`[tag-inherit] Inheriting tag "${effectiveTag}" from most recent turn`);
+    }
+  }
+
   // Create the turn record with the effective model (so the UI can display it)
-  const turn = createTurn(content, project_tag, effectiveModel, workDir, effectiveMode);
+  const turn = createTurn(content, effectiveTag, effectiveModel, workDir, effectiveMode);
 
   // Handle file uploads
   let fileAttachments: FileAttachment[] | undefined;
@@ -101,13 +116,14 @@ async function handleTurnFlow(
     abortController.abort();
   });
 
-  // Tag detection: always detect unless turn was manually tagged
+  // Tag detection: always detect unless turn was manually tagged.
+  // Inherited tags are treated like inferred — the model can override.
   const shouldDetectTag = turn.project_tag_source !== 'manual';
 
   // Fetch recent turns for context injection (project-scoped if tagged, global otherwise)
   // Results come back DESC (newest first) — reverse for chronological preamble order
-  const recentTurns = project_tag
-    ? getRecentTurnContext(5, project_tag).reverse()
+  const recentTurns = effectiveTag
+    ? getRecentTurnContext(5, effectiveTag).reverse()
     : getRecentTurnContext(5).reverse();
 
   const rawStream = streamGemini({
@@ -119,6 +135,7 @@ async function handleTurnFlow(
     permissionMode,
     files: fileAttachments,
     projectTag: turn.project_tag || undefined,
+    tagInherited,
     recentTurns,
   });
 

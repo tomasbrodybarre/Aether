@@ -64,6 +64,8 @@ export interface GeminiStreamOptions {
   permissionMode?: string;
   files?: FileAttachment[];
   projectTag?: string;
+  /** True when the projectTag was inherited from the most recent turn (not explicitly set) */
+  tagInherited?: boolean;
   /** Recent turns for context injection into the preamble */
   recentTurns?: TurnContext[];
 }
@@ -868,7 +870,7 @@ function formatTurnContext(turns: TurnContext[]): string {
   return lines.join('\n');
 }
 
-function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnContext[]): string {
+function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnContext[], tagInherited?: boolean): string {
   const hostname = os.hostname();
   const platform = os.platform();
   const release = os.release();
@@ -1004,16 +1006,23 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
     ? knownProjects.map(p => `"${p}"`).join(', ')
     : '"Aether", "Fledgling", "M3T Research"';
 
+  const tagStatus = currentProjectTag
+    ? (tagInherited
+      ? `Current project tag: "${currentProjectTag}" (inherited from previous turn — verify it still applies).`
+      : `Current project tag: "${currentProjectTag}".`)
+    : 'Current project tag: none.';
+
   lines.push(
     '',
-    '## Per-turn project tagging',
-    `Current project tag: ${currentProjectTag || 'none'}.`,
+    '## Per-turn project tagging (IMPORTANT)',
+    tagStatus,
     `Known projects: ${projectListStr}.`,
-    'If the project for this turn differs from the current tag, or if no tag is set,',
-    'emit `<!-- project: TagName -->` at the very start of your response (before any other text).',
-    'Otherwise, do NOT emit any marker — the current tag is correct.',
-    'The marker is invisible in rendered markdown and will be stripped from the saved response.',
-    'ONLY use project names from the known projects list above. Do NOT invent new names or use working directory basenames.',
+    'RULES:',
+    '1. If no tag is set, you MUST emit `<!-- project: TagName -->` at the very start of your response (before any other text).',
+    '2. If the current tag is wrong for this turn\'s topic, emit the marker with the correct project name.',
+    '3. If the current tag is correct, do NOT emit any marker.',
+    '4. The marker is invisible in rendered markdown and will be stripped from the saved response.',
+    '5. ONLY use project names from the known projects list above. Do NOT invent new names or use working directory basenames.',
   );
 
   // Recent conversation context
@@ -1354,8 +1363,11 @@ export function createTagDetectionTransform(
   entityType: 'session' | 'turn' = 'session',
 ): TransformStream<string, string> {
   if (!enabled) {
+    console.log(`[tag-detect] DISABLED for ${entityType} ${entityId.slice(0, 8)}… (source=manual)`);
     return new TransformStream(); // passthrough
   }
+
+  console.log(`[tag-detect] ENABLED for ${entityType} ${entityId.slice(0, 8)}… — scanning first ${TAG_SCAN_LIMIT} chars`);
 
   let textSoFar = '';
   let scanning = true;
@@ -1394,6 +1406,7 @@ export function createTagDetectionTransform(
       if (match) {
         const detectedTag = match[1].trim();
         scanning = false;
+        console.log(`[tag-detect] FOUND marker for ${entityType} ${entityId.slice(0, 8)}… → "${detectedTag}" (at char ${match.index})`);
 
         // Update DB — route to correct table based on entity type
         try {
@@ -1431,6 +1444,8 @@ export function createTagDetectionTransform(
       // No marker yet — flush if we've scanned enough text or hit a tool_use
       if (textSoFar.length >= TAG_SCAN_LIMIT || hasToolUse) {
         scanning = false;
+        const reason = hasToolUse ? 'tool_use event' : `text limit (${textSoFar.length} chars)`;
+        console.log(`[tag-detect] NO marker for ${entityType} ${entityId.slice(0, 8)}… — gave up after ${reason}. First 120 chars: "${textSoFar.slice(0, 120).replace(/\n/g, '\\n')}"`);
         for (const buffered of bufferedChunks) {
           controller.enqueue(buffered);
         }
@@ -1443,6 +1458,9 @@ export function createTagDetectionTransform(
 
     flush(controller) {
       // Flush any remaining buffered chunks
+      if (scanning && bufferedChunks.length > 0) {
+        console.log(`[tag-detect] Stream ended while still scanning for ${entityType} ${entityId.slice(0, 8)}… (${textSoFar.length} chars scanned). First 120 chars: "${textSoFar.slice(0, 120).replace(/\n/g, '\\n')}"`);
+      }
       for (const buffered of bufferedChunks) {
         controller.enqueue(buffered);
       }
@@ -1559,7 +1577,7 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
         // Build the Aether preamble and inject it into the prompt.
         // Gemini Core loads GEMINI.md natively, but we prepend our
         // Aether-specific instructions as a system context block.
-        const preamble = buildAetherPreamble(options.projectTag, options.recentTurns);
+        const preamble = buildAetherPreamble(options.projectTag, options.recentTurns, options.tagInherited);
         const contextParts = [preamble, systemPrompt].filter(Boolean);
 
         // If there's context to inject, prepend it to the prompt
