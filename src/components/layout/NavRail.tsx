@@ -31,7 +31,7 @@ interface NavRailProps {
 }
 
 const navItems = [
-  { href: "/project/current", label: "Projects", icon: Message02Icon },
+  { href: "/project/timeline", label: "Projects", icon: Message02Icon },
   { href: "/extensions", label: "Extensions", icon: GridIcon },
   { href: "/settings", label: "Settings", icon: Settings02Icon },
 ] as const;
@@ -50,7 +50,7 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
   return (
     <aside className="flex w-14 shrink-0 flex-col items-center bg-sidebar pb-3 pt-3">
       {/* Logo */}
-      <Link href="/project/current" className="mb-3">
+      <Link href="/project/timeline" className="mb-3">
         <Image
           src="/aether_logo.png"
           alt="Aether"
@@ -69,7 +69,7 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
             size="icon"
             className="mb-2 h-9 w-9"
           >
-            <Link href="/project/current">
+            <Link href="/project/timeline">
               <HugeiconsIcon icon={PlusSignIcon} className="h-4 w-4" />
               <span className="sr-only">New Chat</span>
             </Link>
@@ -85,7 +85,7 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
       <nav className="flex flex-1 flex-col items-center gap-1">
         {navItems.map((item) => {
           const isActive =
-            item.href === "/project/current"
+            item.href === "/project/timeline"
               ? pathname.startsWith("/project/") || pathname === "/chat" || pathname.startsWith("/chat/")
               : item.href === "/extensions"
                 ? pathname.startsWith("/extensions")
@@ -94,7 +94,7 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
           return (
             <Tooltip key={item.href}>
               <TooltipTrigger asChild>
-                {item.href === "/project/current" ? (
+                {item.href === "/project/timeline" ? (
                   <Button
                     variant="ghost"
                     size="icon"
@@ -104,7 +104,7 @@ export function NavRail({ chatListOpen, onToggleChatList, skipPermissionsActive 
                     )}
                     onClick={() => {
                       if (!isChatRoute) {
-                        router.push("/project/current");
+                        router.push("/project/timeline");
                         onToggleChatList();
                       } else {
                         onToggleChatList();

@@ -28,15 +28,17 @@ interface ToolResultInfo {
 }
 
 interface ProjectFeedViewProps {
-  /** Project tag — null for "current" (untagged) */
+  /** Project tag — null for untagged turns */
   projectTag: string | null;
   initialTurns?: TurnRecord[];
+  /** When true, this is the Timeline view showing all turns across projects */
+  isTimeline?: boolean;
 }
 
 // Module-level cache for content width setting
 let cachedContentWidth: number | null = null;
 
-export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedViewProps) {
+export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = false }: ProjectFeedViewProps) {
   const { setWorkingDirectory, setPendingApprovalSessionId } = usePanel();
   const { addToast } = useToast();
 

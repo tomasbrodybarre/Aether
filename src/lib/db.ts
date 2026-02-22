@@ -511,6 +511,21 @@ export function getTurnsByProjectAsc(projectTag: string | null): Turn[] {
   return db.prepare('SELECT * FROM turns WHERE project_tag = ? ORDER BY created_at ASC').all(projectTag) as Turn[];
 }
 
+/** Get lightweight recent turn context for preamble injection */
+export function getRecentTurnContext(limit: number = 5, projectTag?: string | null): {
+  prompt: string; response: string | null; project_tag: string | null; created_at: string;
+}[] {
+  const db = getDb();
+  if (projectTag !== undefined && projectTag !== null) {
+    return db.prepare(
+      'SELECT prompt, response, project_tag, created_at FROM turns WHERE project_tag = ? ORDER BY created_at DESC LIMIT ?'
+    ).all(projectTag, limit) as { prompt: string; response: string | null; project_tag: string | null; created_at: string; }[];
+  }
+  return db.prepare(
+    'SELECT prompt, response, project_tag, created_at FROM turns ORDER BY created_at DESC LIMIT ?'
+  ).all(limit) as { prompt: string; response: string | null; project_tag: string | null; created_at: string; }[];
+}
+
 export function deleteTurn(id: string): boolean {
   const db = getDb();
   const result = db.prepare('DELETE FROM turns WHERE id = ?').run(id);

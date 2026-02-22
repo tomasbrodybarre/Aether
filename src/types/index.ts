@@ -75,6 +75,7 @@ export interface Message {
   created_at: string;
   token_usage: string | null; // JSON string of TokenUsage
   project_tag?: string | null; // Project tag for memory system routing
+  model?: string | null; // Model that generated this response
 }
 
 // Structured message content blocks (stored as JSON in messages.content)
@@ -482,6 +483,7 @@ export function turnToMessages(turn: TurnRecord): Message[] {
     content: turn.prompt,
     created_at: turn.created_at,
     token_usage: null,
+    project_tag: turn.project_tag,
   });
 
   if (turn.response) {
@@ -494,6 +496,8 @@ export function turnToMessages(turn: TurnRecord): Message[] {
       token_usage: (turn.usage_input || turn.usage_output)
         ? JSON.stringify({ input_tokens: turn.usage_input || 0, output_tokens: turn.usage_output || 0 })
         : null,
+      project_tag: turn.project_tag,
+      model: turn.model,
     });
   }
 

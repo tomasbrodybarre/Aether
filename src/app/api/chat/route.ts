@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { streamGemini, createTagDetectionTransform } from '@/lib/gemini-core';
-import { addMessage, getSession, updateSessionTitle, getSetting, createTurn, updateTurnResponse } from '@/lib/db';
+import { addMessage, getSession, updateSessionTitle, getSetting, createTurn, updateTurnResponse, getRecentTurnContext } from '@/lib/db';
 import type { SendMessageRequest, SSEEvent, TokenUsage, MessageContentBlock, FileAttachment } from '@/types';
 import fs from 'fs';
 import path from 'path';
@@ -58,10 +58,11 @@ async function handleTurnFlow(
   const { content, model, mode, files, project_tag, working_directory } = body;
 
   const effectiveMode = mode || 'code';
+  const effectiveModel = model || getSetting('default_model') || 'gemini-2.5-pro';
   const workDir = working_directory || getSetting('default_working_directory') || process.cwd();
 
-  // Create the turn record
-  const turn = createTurn(content, project_tag, model, workDir, effectiveMode);
+  // Create the turn record with the effective model (so the UI can display it)
+  const turn = createTurn(content, project_tag, effectiveModel, workDir, effectiveMode);
 
   // Handle file uploads
   let fileAttachments: FileAttachment[] | undefined;
@@ -103,15 +104,22 @@ async function handleTurnFlow(
   // Tag detection: always detect unless turn was manually tagged
   const shouldDetectTag = turn.project_tag_source !== 'manual';
 
+  // Fetch recent turns for context injection (project-scoped if tagged, global otherwise)
+  // Results come back DESC (newest first) — reverse for chronological preamble order
+  const recentTurns = project_tag
+    ? getRecentTurnContext(5, project_tag).reverse()
+    : getRecentTurnContext(5).reverse();
+
   const rawStream = streamGemini({
     prompt: content,
-    model: model || getSetting('default_model') || undefined,
+    model: effectiveModel,
     systemPrompt: systemPromptOverride,
     workingDirectory: workDir,
     abortController,
     permissionMode,
     files: fileAttachments,
     projectTag: turn.project_tag || undefined,
+    recentTurns,
   });
 
   // Pipe through tag detection (routes to updateTurnProjectTag)

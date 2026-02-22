@@ -194,7 +194,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
       <div className="flex h-full items-center justify-center">
         <div className="text-center space-y-2">
           <p className="text-destructive font-medium">{error}</p>
-          <a href="/project/current" className="text-sm text-muted-foreground hover:underline">
+          <a href="/project/timeline" className="text-sm text-muted-foreground hover:underline">
             Start a new chat
           </a>
         </div>

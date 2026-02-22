@@ -1,3 +1,5 @@
+'use client';
+
 import { useEffect, useState, useCallback, use } from 'react';
 import type { TurnRecord } from '@/types';
 import { ProjectFeedView } from '@/components/chat/ProjectFeedView';
@@ -8,23 +10,45 @@ import { Loading02Icon } from '@hugeicons/core-free-icons';
 import { usePanel } from '@/hooks/usePanel';
 import { ConnectionStatus } from '@/components/layout/ConnectionStatus';
 
+// Special route keys
+const TIMELINE_TAG = 'timeline';
+const UNTAGGED_TAG = 'untagged';
+
 interface ProjectPageProps {
   params: Promise<{ tag: string }>;
 }
 
 export default function ProjectPage({ params }: ProjectPageProps) {
   const { tag: rawTag } = use(params);
-  const tag = rawTag === 'current' ? null : decodeURIComponent(rawTag);
+  const decodedTag = decodeURIComponent(rawTag);
+
+  // Determine the view mode from the URL
+  const isTimeline = decodedTag === TIMELINE_TAG;
+  const isUntagged = decodedTag === UNTAGGED_TAG;
+  // For the legacy 'current' route, treat as untagged
+  const isLegacyCurrent = decodedTag === 'current';
+
+  // The actual project_tag for DB queries (null = untagged)
+  const projectTag = isTimeline ? '__all__'
+    : (isUntagged || isLegacyCurrent) ? null
+    : decodedTag;
 
   const { setWorkingDirectory } = usePanel();
   const [turns, setTurns] = useState<TurnRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [consolidating, setConsolidating] = useState(false);
   const [allProjectTags, setAllProjectTags] = useState<string[]>([]);
 
   const fetchTurns = useCallback(async () => {
     try {
-      const query = tag === null ? 'project_tag=__untagged__' : `project_tag=${encodeURIComponent(tag)}`;
+      let query: string;
+      if (isTimeline) {
+        // All turns, no filter
+        query = 'limit=200';
+      } else if (projectTag === null) {
+        query = 'project_tag=__untagged__';
+      } else {
+        query = `project_tag=${encodeURIComponent(projectTag)}`;
+      }
       const res = await fetch(`/api/turns?${query}`);
       if (res.ok) {
         const data = await res.json();
@@ -41,7 +65,7 @@ export default function ProjectPage({ params }: ProjectPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [tag]);
+  }, [isTimeline, projectTag]);
 
   const fetchProjectTags = useCallback(async () => {
     try {
@@ -54,21 +78,6 @@ export default function ProjectPage({ params }: ProjectPageProps) {
       // Best effort
     }
   }, []);
-
-  const handleConsolidate = useCallback(async () => {
-    if (!tag) return;
-    setConsolidating(true);
-    try {
-      const res = await fetch('/api/memory/consolidate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project: tag }),
-      });
-      // TODO: Show toast notification with result
-    } finally {
-      setConsolidating(false);
-    }
-  }, [tag]);
 
   // Initial load
   useEffect(() => {
@@ -101,6 +110,27 @@ export default function ProjectPage({ params }: ProjectPageProps) {
     }
   }, [turns, setWorkingDirectory]);
 
+  const [consolidating, setConsolidating] = useState(false);
+
+  const handleConsolidate = useCallback(async () => {
+    if (isTimeline || isUntagged || isLegacyCurrent || consolidating) return;
+    setConsolidating(true);
+    try {
+      const res = await fetch('/api/memory/consolidate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectName: decodedTag }),
+      });
+      if (!res.ok) {
+        console.error('Consolidation failed:', await res.text());
+      }
+    } catch (err) {
+      console.error('Consolidation error:', err);
+    } finally {
+      setConsolidating(false);
+    }
+  }, [isTimeline, isUntagged, isLegacyCurrent, decodedTag, consolidating]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -112,7 +142,15 @@ export default function ProjectPage({ params }: ProjectPageProps) {
     );
   }
 
-  const displayName = tag || 'Current';
+  const displayName = isTimeline ? 'Timeline'
+    : (isUntagged || isLegacyCurrent) ? 'Untagged'
+    : decodedTag;
+
+  // For ProjectFeedView, we pass the actual project tag (null for untagged/timeline)
+  // Timeline sends new turns without a project tag — they'll appear in the feed
+  const feedProjectTag = isTimeline ? null : projectTag;
+
+  const isProjectView = !isTimeline && !isUntagged && !isLegacyCurrent;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -123,10 +161,10 @@ export default function ProjectPage({ params }: ProjectPageProps) {
           {displayName}
         </span>
         <div className="flex-1 min-w-0 flex items-center justify-end gap-2">
-          {tag && (
+          {isProjectView && (
             <>
               <ProjectTagEditor
-                currentTag={tag}
+                currentTag={decodedTag}
                 isManualOverride={false}
                 autoTag=""
                 allTags={allProjectTags}
@@ -151,8 +189,9 @@ export default function ProjectPage({ params }: ProjectPageProps) {
 
       <ProjectFeedView
         key={rawTag}
-        projectTag={tag}
+        projectTag={feedProjectTag}
         initialTurns={turns}
+        isTimeline={isTimeline}
       />
     </div>
   );

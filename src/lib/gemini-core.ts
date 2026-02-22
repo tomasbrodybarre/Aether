@@ -47,6 +47,14 @@ import { processAetherInitDirectives } from './aether-init';
 // Types
 // ---------------------------------------------------------------------------
 
+/** Lightweight turn context for preamble injection */
+export interface TurnContext {
+  prompt: string;
+  response: string | null;
+  project_tag: string | null;
+  created_at: string;
+}
+
 export interface GeminiStreamOptions {
   prompt: string;
   workingDirectory?: string;
@@ -56,6 +64,8 @@ export interface GeminiStreamOptions {
   permissionMode?: string;
   files?: FileAttachment[];
   projectTag?: string;
+  /** Recent turns for context injection into the preamble */
+  recentTurns?: TurnContext[];
 }
 
 /**
@@ -807,7 +817,52 @@ function _extractKnownProjectNames(content: string): string[] {
   return names;
 }
 
-function buildAetherPreamble(currentProjectTag?: string): string {
+const RESPONSE_TRUNCATION_LIMIT = 4000;
+
+function formatTurnContext(turns: TurnContext[]): string {
+  if (turns.length === 0) return '';
+
+  const lines: string[] = [
+    '## Recent conversation context (last ' + turns.length + ' turns)',
+    'These are the most recent turns for continuity. Refer to them for context but do not repeat information the user already knows.',
+    '',
+  ];
+
+  for (const turn of turns) {
+    const timestamp = turn.created_at.replace('T', ' ').replace(/\.\d+Z?$/, '');
+    const tagLabel = turn.project_tag || 'untagged';
+    lines.push(`[${timestamp} | ${tagLabel}]`);
+    lines.push(`User: ${turn.prompt}`);
+
+    if (turn.response) {
+      // Strip JSON tool blocks — only include text content
+      let responseText = turn.response;
+      try {
+        const parsed = JSON.parse(responseText);
+        if (Array.isArray(parsed)) {
+          responseText = parsed
+            .filter((b: { type: string }) => b.type === 'text')
+            .map((b: { text: string }) => b.text)
+            .join('');
+        }
+      } catch {
+        // Plain text response — use as-is
+      }
+
+      if (responseText.length > RESPONSE_TRUNCATION_LIMIT) {
+        const originalLen = responseText.length;
+        responseText = responseText.slice(0, RESPONSE_TRUNCATION_LIMIT)
+          + `... [truncated, original was ~${originalLen.toLocaleString()} chars]`;
+      }
+      lines.push(`Assistant: ${responseText}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnContext[]): string {
   const hostname = os.hostname();
   const platform = os.platform();
   const release = os.release();
@@ -935,6 +990,11 @@ function buildAetherPreamble(currentProjectTag?: string): string {
     'The marker is invisible in rendered markdown and will be stripped from the saved response.',
     'ONLY use project names from the known projects list above. Do NOT invent new names or use working directory basenames.',
   );
+
+  // Recent conversation context
+  if (recentTurns && recentTurns.length > 0) {
+    lines.push('', formatTurnContext(recentTurns));
+  }
 
   // Append pre-read content at the end of the preamble
   if (preReadContent) {
@@ -1434,13 +1494,11 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
           throw new Error('Gemini Core failed to initialize');
         }
 
-        // If a different model is requested, update config
-        // (Core supports mid-session model switching)
+        // If a different model is requested, update config via Core's setModel API.
+        // This updates both the persistent and active model, emits a change event
+        // (which resets GeminiClient.currentSequenceModel), and clears availability tracking.
         if (model) {
-          // The Config object's model is set at construction, but
-          // the client respects the model from config for each turn.
-          // For now, note that model switching will be handled at
-          // the Config level in a future iteration.
+          config.setModel(model, false);
         }
 
         // Build the prompt text, incorporating file attachments
@@ -1476,7 +1534,7 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
         // Build the Aether preamble and inject it into the prompt.
         // Gemini Core loads GEMINI.md natively, but we prepend our
         // Aether-specific instructions as a system context block.
-        const preamble = buildAetherPreamble(options.projectTag);
+        const preamble = buildAetherPreamble(options.projectTag, options.recentTurns);
         const contextParts = [preamble, systemPrompt].filter(Boolean);
 
         // If there's context to inject, prepend it to the prompt

@@ -20,7 +20,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { ProjectTagEditor } from "@/components/chat/ProjectTagEditor";
 
 import { ImportSessionDialog } from "./ImportSessionDialog";
 import type { ChatSession, TurnRecord } from "@/types";
@@ -30,6 +29,11 @@ interface ChatListPanelProps {
   open: boolean;
   width?: number;
 }
+
+// ─── Constants ─────────────────────────────────────────────
+
+const TIMELINE_KEY = "__timeline__";
+const UNTAGGED_KEY = "__untagged__";
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -48,54 +52,83 @@ function formatRelativeTime(dateStr: string): string {
   return date.toLocaleDateString();
 }
 
-const MODE_BADGE_CONFIG: Record<string, { label: string; className: string }> = {
-  code: { label: "Code", className: "bg-blue-500/10 text-blue-500" },
-  plan: { label: "Plan", className: "bg-sky-500/10 text-sky-500" },
-  ask: { label: "Ask", className: "bg-green-500/10 text-green-500" },
-};
-
-const CURRENT_PROJECT_KEY = "__current__";
-
-interface ProjectGroup {
-  tag: string; // CURRENT_PROJECT_KEY for untagged
+interface NavGroup {
+  key: string;
   displayName: string;
-  turns: TurnRecord[];
-  latestTime: string; // for sorting
+  href: string;
+  count: number;
+  latestTime: string | null;
 }
 
-function groupTurnsByProject(turns: TurnRecord[]): ProjectGroup[] {
-  const map = new Map<string, TurnRecord[]>();
+function buildNavGroups(turns: TurnRecord[]): NavGroup[] {
+  const groups: NavGroup[] = [];
 
-  for (const turn of turns) {
-    const key = turn.project_tag || CURRENT_PROJECT_KEY;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key)!.push(turn);
-  }
-
-  const groups: ProjectGroup[] = [];
-  for (const [key, groupTurns] of map) {
-    // Sort turns within group: newest first for sidebar display
-    groupTurns.sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  // Timeline: all turns
+  if (turns.length > 0) {
+    const newest = turns.reduce((a, b) =>
+      new Date(b.created_at).getTime() > new Date(a.created_at).getTime() ? b : a
     );
     groups.push({
-      tag: key,
-      displayName: key === CURRENT_PROJECT_KEY ? "Current" : key,
-      turns: groupTurns,
-      latestTime: groupTurns[0].created_at,
+      key: TIMELINE_KEY,
+      displayName: "Timeline",
+      href: "/project/timeline",
+      count: turns.length,
+      latestTime: newest.created_at,
+    });
+  } else {
+    groups.push({
+      key: TIMELINE_KEY,
+      displayName: "Timeline",
+      href: "/project/timeline",
+      count: 0,
+      latestTime: null,
     });
   }
 
-  // Sort groups: "Current" always first, then by most recent activity
-  groups.sort((a, b) => {
-    if (a.tag === CURRENT_PROJECT_KEY) return -1;
-    if (b.tag === CURRENT_PROJECT_KEY) return 1;
-    return (
-      new Date(b.latestTime).getTime() - new Date(a.latestTime).getTime()
+  // Untagged
+  const untagged = turns.filter((t) => !t.project_tag);
+  if (untagged.length > 0) {
+    const newest = untagged.reduce((a, b) =>
+      new Date(b.created_at).getTime() > new Date(a.created_at).getTime() ? b : a
     );
-  });
+    groups.push({
+      key: UNTAGGED_KEY,
+      displayName: "Untagged",
+      href: "/project/untagged",
+      count: untagged.length,
+      latestTime: newest.created_at,
+    });
+  }
 
+  // Per-project groups, sorted by most recent activity
+  const projectMap = new Map<string, TurnRecord[]>();
+  for (const turn of turns) {
+    if (!turn.project_tag) continue;
+    if (!projectMap.has(turn.project_tag)) projectMap.set(turn.project_tag, []);
+    projectMap.get(turn.project_tag)!.push(turn);
+  }
+
+  const projectGroups: NavGroup[] = [];
+  for (const [tag, projectTurns] of projectMap) {
+    const newest = projectTurns.reduce((a, b) =>
+      new Date(b.created_at).getTime() > new Date(a.created_at).getTime() ? b : a
+    );
+    projectGroups.push({
+      key: tag,
+      displayName: tag,
+      href: `/project/${encodeURIComponent(tag)}`,
+      count: projectTurns.length,
+      latestTime: newest.created_at,
+    });
+  }
+
+  // Sort project groups by recency
+  projectGroups.sort(
+    (a, b) =>
+      new Date(b.latestTime!).getTime() - new Date(a.latestTime!).getTime()
+  );
+
+  groups.push(...projectGroups);
   return groups;
 }
 
@@ -108,14 +141,9 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
   // Data
   const [turns, setTurns] = useState<TurnRecord[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [allProjectTags, setAllProjectTags] = useState<string[]>([]);
 
   // UI state
-  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(
-    () => new Set([CURRENT_PROJECT_KEY])
-  );
   const [showLegacy, setShowLegacy] = useState(false);
-  const [hoveredTurn, setHoveredTurn] = useState<string | null>(null);
   const [hoveredSession, setHoveredSession] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -147,24 +175,11 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
     }
   }, []);
 
-  const fetchProjectTags = useCallback(async () => {
-    try {
-      const res = await fetch("/api/turns/projects");
-      if (res.ok) {
-        const data = await res.json();
-        setAllProjectTags(data.tags || []);
-      }
-    } catch {
-      // API may not be available yet
-    }
-  }, []);
-
   // Initial fetch
   useEffect(() => {
     fetchTurns();
     fetchSessions();
-    fetchProjectTags();
-  }, [fetchTurns, fetchSessions, fetchProjectTags]);
+  }, [fetchTurns, fetchSessions]);
 
   // Refresh on navigation
   useEffect(() => {
@@ -175,9 +190,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
   useEffect(() => {
     const handler = () => {
       fetchTurns();
-      fetchProjectTags();
     };
-    // Listen for both legacy session events and new turn events
     window.addEventListener("session-created", handler);
     window.addEventListener("session-updated", handler);
     window.addEventListener("turn-created", handler);
@@ -188,7 +201,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
       window.removeEventListener("turn-created", handler);
       window.removeEventListener("turn-updated", handler);
     };
-  }, [fetchTurns, fetchProjectTags]);
+  }, [fetchTurns]);
 
   // ─── Filtering ────────────────────────────────────────
 
@@ -203,8 +216,8 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
     );
   }, [turns, searchQuery]);
 
-  const projectGroups = useMemo(
-    () => groupTurnsByProject(filteredTurns),
+  const navGroups = useMemo(
+    () => buildNavGroups(filteredTurns),
     [filteredTurns]
   );
 
@@ -219,51 +232,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
     );
   }, [sessions, searchQuery]);
 
-  // ─── Expand / collapse ─────────────────────────────────
-
-  // Auto-expand the active project based on current pathname
-  useEffect(() => {
-    const match = pathname.match(/^\/project\/(.+?)(?:#|$)/);
-    if (match) {
-      const tag = decodeURIComponent(match[1]);
-      const key = tag === "current" ? CURRENT_PROJECT_KEY : tag;
-      setExpandedProjects((prev) => {
-        if (prev.has(key)) return prev;
-        const next = new Set(prev);
-        next.add(key);
-        return next;
-      });
-    }
-  }, [pathname]);
-
-  const toggleProject = useCallback((key: string) => {
-    setExpandedProjects((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
-
   // ─── Actions ──────────────────────────────────────────
-
-  const handleDeleteTurn = async (e: React.MouseEvent, turnId: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!confirm("Delete this turn?")) return;
-    setDeletingId(turnId);
-    try {
-      const res = await fetch(`/api/turns/${turnId}`, { method: "DELETE" });
-      if (res.ok) {
-        setTurns((prev) => prev.filter((t) => t.id !== turnId));
-        fetchProjectTags();
-      }
-    } catch {
-      // Silently fail
-    } finally {
-      setDeletingId(null);
-    }
-  };
 
   const handleDeleteSession = async (
     e: React.MouseEvent,
@@ -280,7 +249,7 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
       if (res.ok) {
         setSessions((prev) => prev.filter((s) => s.id !== sessionId));
         if (pathname === `/chat/${sessionId}`) {
-          router.push("/project/current");
+          router.push("/project/timeline");
         }
       }
     } catch {
@@ -290,49 +259,14 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
     }
   };
 
-  const handleTurnTagChange = useCallback(
-    async (turnId: string, newTag: string | null) => {
-      const newSource = newTag ? ("manual" as const) : null;
-      // Optimistic update
-      setTurns((prev) =>
-        prev.map((t) =>
-          t.id === turnId
-            ? { ...t, project_tag: newTag, project_tag_source: newSource }
-            : t
-        )
-      );
-      try {
-        await fetch(`/api/turns/${turnId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            project_tag: newTag,
-            project_tag_source: newSource,
-          }),
-        });
-        fetchProjectTags();
-        window.dispatchEvent(new CustomEvent("turn-updated"));
-      } catch {
-        fetchTurns();
-      }
-    },
-    [fetchTurns, fetchProjectTags]
-  );
-
   // ─── Render ───────────────────────────────────────────
 
   if (!open) return null;
 
-  const projectHref = (tag: string) =>
-    tag === CURRENT_PROJECT_KEY
-      ? "/project/current"
-      : `/project/${encodeURIComponent(tag)}`;
-
-  const turnHref = (turn: TurnRecord) => {
-    const base = turn.project_tag
-      ? `/project/${encodeURIComponent(turn.project_tag)}`
-      : "/project/current";
-    return `${base}#${turn.id}`;
+  const isActiveGroup = (group: NavGroup) => {
+    if (group.key === TIMELINE_KEY) return pathname === "/project/timeline";
+    if (group.key === UNTAGGED_KEY) return pathname === "/project/untagged";
+    return pathname === group.href || pathname.startsWith(group.href + "#");
   };
 
   return (
@@ -363,139 +297,40 @@ export function ChatListPanel({ open, width }: ChatListPanelProps) {
         </div>
       </div>
 
-      {/* Project list */}
+      {/* Navigation groups */}
       <ScrollArea className="flex-1 min-h-0 px-3">
-        <div className="flex flex-col pb-3">
-          {/* Turns grouped by project */}
-          {projectGroups.length === 0 && !filteredSessions.length ? (
+        <div className="flex flex-col gap-0.5 pb-3">
+          {navGroups.length === 0 && !filteredSessions.length ? (
             <p className="px-2.5 py-3 text-[0.6875rem] text-muted-foreground/60">
               {searchQuery ? "No matching turns" : "No conversations yet"}
             </p>
           ) : (
             <>
-              {projectGroups.map((group) => {
-                const isExpanded = expandedProjects.has(group.tag);
-                const isActiveProject =
-                  pathname === projectHref(group.tag) ||
-                  pathname.startsWith(
-                    group.tag === CURRENT_PROJECT_KEY
-                      ? "/project/current"
-                      : `/project/${encodeURIComponent(group.tag)}`
-                  );
+              {navGroups.map((group) => {
+                const active = isActiveGroup(group);
 
                 return (
-                  <div key={group.tag} className="mt-1 first:mt-0">
-                    {/* Project header */}
-                    <button
-                      className={cn(
-                        "flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left transition-colors",
-                        isActiveProject
-                          ? "bg-sidebar-accent/50 text-sidebar-accent-foreground"
-                          : "text-sidebar-foreground hover:bg-accent/40"
-                      )}
-                      onClick={() => toggleProject(group.tag)}
-                    >
-                      <HugeiconsIcon
-                        icon={isExpanded ? ArrowDown01Icon : ArrowRight01Icon}
-                        className="h-3 w-3 shrink-0 text-muted-foreground"
-                      />
-                      <span className="text-[0.8125rem] font-medium leading-tight truncate">
-                        {group.displayName}
-                      </span>
-                      <span className="ml-auto text-[0.625rem] text-muted-foreground/40 shrink-0">
-                        {group.turns.length}
-                      </span>
-                    </button>
-
-                    {/* Turns list (when expanded) */}
-                    {isExpanded && (
-                      <div className="ml-3 mt-0.5 flex flex-col gap-0.5 border-l border-border/40 pl-2">
-                        {group.turns.map((turn) => {
-                          const isHovered = hoveredTurn === turn.id;
-                          const isDeleting = deletingId === turn.id;
-                          const mode = turn.mode || "code";
-                          const badgeCfg =
-                            MODE_BADGE_CONFIG[mode] || MODE_BADGE_CONFIG.code;
-                          const isManualTag =
-                            turn.project_tag_source === "manual";
-
-                          return (
-                            <div
-                              key={turn.id}
-                              className="group relative"
-                              onMouseEnter={() => setHoveredTurn(turn.id)}
-                              onMouseLeave={() => setHoveredTurn(null)}
-                            >
-                              <Link
-                                href={turnHref(turn)}
-                                className={cn(
-                                  "flex flex-col gap-0.5 rounded-md px-2 py-1.5 transition-all duration-150",
-                                  "text-sidebar-foreground hover:bg-accent/50"
-                                )}
-                              >
-                                <span className="line-clamp-2 text-[0.75rem] leading-tight break-all">
-                                  {turn.title}
-                                </span>
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <ProjectTagEditor
-                                    currentTag={turn.project_tag || ''}
-                                    isManualOverride={isManualTag}
-                                    autoTag=""
-                                    allTags={allProjectTags}
-                                    onTagChange={(tag) =>
-                                      handleTurnTagChange(turn.id, tag)
-                                    }
-                                    variant="sidebar"
-                                  />
-                                  <span className="text-[0.625rem] text-muted-foreground/40 shrink-0 ml-auto">
-                                    {formatRelativeTime(turn.created_at)}
-                                  </span>
-                                </div>
-                              </Link>
-                              {(isHovered || isDeleting) && (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon-xs"
-                                      className="absolute right-0.5 top-1 text-muted-foreground/60 hover:text-destructive"
-                                      onClick={(e) =>
-                                        handleDeleteTurn(e, turn.id)
-                                      }
-                                      disabled={isDeleting}
-                                    >
-                                      <HugeiconsIcon
-                                        icon={Delete02Icon}
-                                        className="h-3 w-3"
-                                      />
-                                      <span className="sr-only">
-                                        Delete turn
-                                      </span>
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="right">
-                                    Delete
-                                  </TooltipContent>
-                                </Tooltip>
-                              )}
-                            </div>
-                          );
-                        })}
-
-                        {/* Link to full project feed */}
-                        <Link
-                          href={projectHref(group.tag)}
-                          className="px-2 py-1 text-[0.625rem] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-                        >
-                          View all in feed
-                        </Link>
-                      </div>
+                  <Link
+                    key={group.key}
+                    href={group.href}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors",
+                      active
+                        ? "bg-sidebar-accent/50 text-sidebar-accent-foreground font-medium"
+                        : "text-sidebar-foreground hover:bg-accent/40"
                     )}
-                  </div>
+                  >
+                    <span className="text-[0.8125rem] leading-tight truncate">
+                      {group.displayName}
+                    </span>
+                    <span className="ml-auto text-[0.625rem] text-muted-foreground/40 shrink-0">
+                      {group.count}
+                    </span>
+                  </Link>
                 );
               })}
 
-              {/* Legacy sessions (collapsed section) */}
+              {/* Legacy sessions (expandable section) */}
               {filteredSessions.length > 0 && (
                 <div className="mt-3">
                   <div className="h-px bg-border/40 mb-2" />
