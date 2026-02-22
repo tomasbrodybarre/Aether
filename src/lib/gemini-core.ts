@@ -69,6 +69,8 @@ interface PendingConfirmation {
   correlationId: string;
   toolName: string;
   createdAt: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  bus: any; // MessageBus reference — survives HMR alongside globalThis pendingMap
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +98,27 @@ function getPendingMap(): Map<string, PendingConfirmation> {
 }
 
 const CONFIRMATION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+// ---------------------------------------------------------------------------
+// Process crash prevention
+// ---------------------------------------------------------------------------
+// Unhandled promise rejections (e.g. from Gemini Core internals, MessageBus,
+// Scheduler) crash Node.js by default. This catches them so they're logged
+// instead of killing the entire Next.js dev server.
+
+const REJECTION_HANDLER_KEY = '__geminiRejectionHandler__' as const;
+if (!(globalThis as Record<string, unknown>)[REJECTION_HANDLER_KEY]) {
+  (globalThis as Record<string, unknown>)[REJECTION_HANDLER_KEY] = true;
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error('[gemini-core] ⚠ Unhandled promise rejection (caught, server NOT crashing):', reason);
+    if (reason instanceof Error && reason.stack) {
+      console.error('[gemini-core] Stack:', reason.stack);
+    }
+    // Prevent the process from crashing — the error is logged but contained.
+    // The specific stream/turn that caused it will fail naturally via its
+    // own try-catch or the SSE connection will close.
+  });
+}
 
 /**
  * Active SSE controller — set during streamGemini(), used by the
@@ -209,6 +232,7 @@ async function _doInit(targetDir: string): Promise<void> {
  *   - Constructive file ops (mkdir, cp, curl, etc.)
  *   - Git operations on memory/skills repos
  *   - web_fetch (for web search results)
+ *   - write_todos (native Gemini Google Tasks tool)
  *
  * Still ASK_USER: rm, git push (non-memory), chmod, sudo, save_memory
  */
@@ -258,7 +282,18 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   });
   ruleCount++;
 
-  // ── 4. save_memory — ASK_USER ──────────────────────────────────────
+  // ── 4. Native Gemini tools ──────────────────────────────────────────
+  //    write_todos — Google Tasks integration. Low risk (writes to
+  //    user's own task list), high friction if prompted every time.
+  pe.addRule({
+    toolName: 'write_todos',
+    decision: PolicyDecision.ALLOW,
+    priority: PRIORITY,
+    source: `${SOURCE} (native tools)`,
+  });
+  ruleCount++;
+
+  // ── 5. save_memory — ASK_USER ──────────────────────────────────────
   //    Gemini's built-in memory tool writes to ~/.gemini/GEMINI.md which
   //    is separate from Aether's memory repo. Prompt the user so they
   //    can gate what goes into GEMINI.md vs the memory folder.
@@ -270,13 +305,13 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   });
   ruleCount++;
 
-  // ── 5. Shell commands ──────────────────────────────────────────────
+  // ── 6. Shell commands ──────────────────────────────────────────────
   //    argsPattern is matched against JSON.stringify(args), e.g.:
   //    {"command":"git status"} or {"command":"npm run dev"}
   //    Strategy: explicit allowlist of safe command prefixes.
   //    Anything not matched falls through to default ASK_USER.
 
-  // 5a. Memory/skills git operations (existing)
+  // 6a. Memory/skills git operations (existing)
   const safeGitOps = [
     'pull', 'fetch', 'status', 'log', 'diff', 'add', 'commit', 'push',
     'rev-parse', 'branch', 'remote',
@@ -297,7 +332,7 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   });
   ruleCount++;
 
-  // 5b. Read-only shell commands
+  // 6b. Read-only shell commands
   const readOnlyCmds = [
     'ls', 'dir', 'pwd', 'which', 'where', 'echo', 'cat', 'head', 'tail',
     'wc', 'sort', 'diff', 'file', 'stat', 'du', 'df', 'env', 'whoami',
@@ -313,12 +348,13 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   });
   ruleCount++;
 
-  // 5c. Dev tool commands (npm, python, node, etc.)
+  // 6c. Dev tool commands (npm, python, node, etc.)
   const devToolCmds = [
     'npm', 'npx', 'node', 'python', 'python3', 'pip', 'pip3',
     'tsc', 'tsx', 'eslint', 'prettier', 'jest', 'vitest', 'pytest',
     'cargo', 'go', 'make', 'cmake', 'dotnet', 'java', 'javac', 'mvn',
     'gradle', 'ruby', 'gem', 'bundle', 'pnpm', 'yarn', 'bun', 'deno',
+    'powershell', 'pwsh',
   ].join('|');
   pe.addRule({
     toolName: 'run_shell_command',
@@ -329,7 +365,7 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   });
   ruleCount++;
 
-  // 5d. Git operations (read-only + safe local ops)
+  // 6d. Git operations (read-only + safe local ops)
   //     Excludes: push (to non-memory repos), reset --hard, clean -f,
   //     rebase, force-push — those stay ASK_USER.
   const safeGitSubcmds = [
@@ -348,7 +384,7 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   });
   ruleCount++;
 
-  // 5e. Constructive file operations (non-destructive)
+  // 6e. Constructive file operations (non-destructive)
   const constructiveCmds = [
     'mkdir', 'touch', 'cp', 'mv', 'ln', 'tar', 'zip', 'unzip', 'gzip',
     'gunzip', 'curl', 'wget',
@@ -362,6 +398,35 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   });
   ruleCount++;
 
+  // 6f. Compound commands starting with cd
+  //     e.g., "cd /path && npm run dev", "cd src && python script.py"
+  pe.addRule({
+    toolName: 'run_shell_command',
+    decision: PolicyDecision.ALLOW,
+    priority: PRIORITY,
+    argsPattern: new RegExp(`"command":"cd\\s`),
+    source: `${SOURCE} (cd compound)`,
+  });
+  ruleCount++;
+
+  // 6g. Full-path executables for known safe commands
+  //     e.g., C:/Python312/python.exe, /usr/bin/node, etc.
+  const safeExeNames = [
+    'python', 'python3', 'python\\.exe', 'python3\\.exe',
+    'node', 'node\\.exe', 'npm', 'npm\\.cmd',
+    'npx', 'npx\\.cmd', 'pip', 'pip3',
+    'git', 'git\\.exe',
+    'powershell\\.exe', 'pwsh', 'pwsh\\.exe',
+  ].join('|');
+  pe.addRule({
+    toolName: 'run_shell_command',
+    decision: PolicyDecision.ALLOW,
+    priority: PRIORITY,
+    argsPattern: new RegExp(`"command":"[^"]*[\\\\/](${safeExeNames})[\\s"]`),
+    source: `${SOURCE} (full-path exec)`,
+  });
+  ruleCount++;
+
   // ── Stays ASK_USER (falls through to default write.toml) ──────────
   //    rm, rmdir, del — destructive deletion
   //    git push (non-memory) — affects remote
@@ -370,6 +435,60 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   //    activate_skill — explicit user action
 
   console.log(`[gemini-core] Added ${ruleCount} auto-approve policy rules`);
+}
+
+// ---------------------------------------------------------------------------
+// Fallback safe-command check (used by the MessageBus auto-approve intercept)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if a shell command is known safe. Used as a fallback when the
+ * PolicyEngine's checkShellCommand() forces ASK_USER due to parser failure.
+ *
+ * This mirrors the regex rules in _addAutoApproveRules but works on
+ * the raw command string without JSON serialization or tree-sitter parsing.
+ */
+function _isKnownSafeShellCommand(cmd: string): boolean {
+  const trimmed = cmd.trim();
+
+  // Deny-listed commands (never auto-approve)
+  const denyPatterns = [
+    /^rm\s/i, /^rmdir\s/i, /^del\s/i, /^erase\s/i,
+    /^sudo\s/i, /^chmod\s/i, /^chown\s/i,
+    /\bgit\s+push\b/i, /\bgit\s+reset\s+--hard\b/i, /\bgit\s+clean\s+-f\b/i,
+    /^format\s/i, /^shutdown\s/i, /^reboot\b/i,
+  ];
+  for (const deny of denyPatterns) {
+    if (deny.test(trimmed)) return false;
+  }
+
+  // Read-only commands
+  const readOnlyCmds = /^(ls|dir|cat|head|tail|less|more|wc|sort|uniq|diff|file|stat|which|where|whoami|pwd|cd|echo|set|env|printenv|hostname|uname|date|tree|find|type|realpath|dirname|basename|Get-ChildItem|Get-Content|Get-Location|Write-Output)\b/i;
+  if (readOnlyCmds.test(trimmed)) return true;
+
+  // Dev tool commands
+  const devToolCmds = /^(npm|npx|node|python|python3|python\.exe|pip|pip3|tsc|tsx|jest|vitest|mocha|pytest|eslint|prettier|cargo|rustc|go|java|javac|gradle|ruby|gem|bundle|pnpm|yarn|bun|deno|powershell|pwsh|dotnet|code)\b/i;
+  if (devToolCmds.test(trimmed)) return true;
+
+  // Git commands (non-push, non-destructive)
+  const safeGitOps = /^git\s+(status|log|diff|show|branch|tag|describe|rev-parse|remote|config|stash|rebase|add|commit|checkout|switch|merge|fetch|pull|init|clone|ls-files|reflog|shortlog|blame)\b/i;
+  if (safeGitOps.test(trimmed)) return true;
+
+  // Constructive file ops
+  const fileOps = /^(mkdir|touch|cp|mv|ln|tar|zip|unzip|gzip|gunzip|curl|wget)\b/i;
+  if (fileOps.test(trimmed)) return true;
+
+  // Compound commands starting with cd
+  if (/^cd\s/i.test(trimmed)) return true;
+
+  // Full-path executables for known safe commands
+  const fullPathSafe = /[\\/](python|python3|python\.exe|node|node\.exe|npm|npm\.cmd|npx|npx\.cmd|pip|pip3|git|git\.exe|powershell\.exe|pwsh|pwsh\.exe|tsc|tsx|code|dotnet|cargo)\s/i;
+  if (fullPathSafe.test(trimmed)) return true;
+
+  // Memory/skills repo operations (match paths)
+  if (/agent-hub[\\/](memory|skills)/i.test(trimmed)) return true;
+
+  return false;
 }
 
 /**
@@ -432,6 +551,7 @@ function _subscribeToolCallsUpdate(bus: any): () => void {
         const lastStatus = statusTracker.get(callId);
         if (lastStatus !== status) {
           statusTracker.set(callId, status);
+          console.log(`[approval-debug] Tool ${toolName} (${callId.slice(0, 8)}) status: ${lastStatus || 'init'} → ${status}`);
           // Emit a status SSE for the tool state transition
           if (activeController) {
             try {
@@ -443,8 +563,8 @@ function _subscribeToolCallsUpdate(bus: any): () => void {
                   tool_call_id: callId,
                 }),
               }));
-            } catch {
-              // Controller may be closed
+            } catch (e) {
+              console.warn('[gemini-core] SSE status enqueue failed (controller closed?):', e);
             }
           }
 
@@ -472,8 +592,8 @@ function _subscribeToolCallsUpdate(bus: any): () => void {
                 type: 'tool_output',
                 data: delta,
               }));
-            } catch {
-              // Controller may be closed
+            } catch (e) {
+              console.warn('[gemini-core] SSE tool_output enqueue failed:', e);
             }
           }
         }
@@ -481,6 +601,7 @@ function _subscribeToolCallsUpdate(bus: any): () => void {
 
       // --- Handle awaiting_approval (permission request) ---
       if (status !== 'awaiting_approval') continue;
+      console.log(`[approval-debug] Tool ${toolName} entered awaiting_approval`);
       const waiting = toolCall as unknown as {
         request: { callId: string; name: string; args: Record<string, unknown> };
         correlationId?: string;
@@ -488,26 +609,34 @@ function _subscribeToolCallsUpdate(bus: any): () => void {
       };
 
       const correlationId = waiting.correlationId;
-      if (!correlationId) continue;
+      if (!correlationId) {
+        console.warn(`[approval-debug] ⚠ No correlationId on waiting tool call — skipping permission_request`);
+        continue;
+      }
+      console.log(`[approval-debug] correlationId=${correlationId.slice(0, 8)}...`);
 
       // Skip if we already emitted this confirmation
-      if (pendingMap.has(correlationId)) continue;
+      if (pendingMap.has(correlationId)) {
+        console.log(`[approval-debug] Skipping duplicate correlationId ${correlationId.slice(0, 8)}...`);
+        continue;
+      }
 
-      // Store the pending confirmation
+      // Store the pending confirmation (with bus ref for HMR resilience)
       pendingMap.set(correlationId, {
         correlationId,
         toolName: waiting.request.name,
         createdAt: Date.now(),
+        bus,
       });
 
-      // Auto-expire after timeout
+      // Auto-expire after timeout — use the stored bus ref (HMR-safe)
       setTimeout(() => {
-        if (pendingMap.has(correlationId)) {
+        const expired = pendingMap.get(correlationId);
+        if (expired) {
           pendingMap.delete(correlationId);
           // Publish a cancel response to unblock the scheduler
-          if (config) {
-            const b = config.getMessageBus();
-            b.publish({
+          if (expired.bus) {
+            expired.bus.publish({
               type: MessageBusType.TOOL_CONFIRMATION_RESPONSE,
               correlationId,
               confirmed: false,
@@ -527,15 +656,36 @@ function _subscribeToolCallsUpdate(bus: any): () => void {
       };
 
       // Push to the active SSE stream
+      console.log(`[approval-debug] activeController=${activeController ? 'PRESENT' : 'NULL'}`);
       if (activeController) {
         try {
-          activeController.enqueue(formatSSE({
+          const permSSE = formatSSE({
             type: 'permission_request',
             data: JSON.stringify(permEvent),
-          }));
-        } catch {
-          // Controller may be closed
+          });
+          console.log(`[approval-debug] ✅ Enqueuing permission_request SSE (${permSSE.length} bytes) for ${toolName}`);
+          activeController.enqueue(permSSE);
+        } catch (e) {
+          console.warn('[gemini-core] Failed to deliver permission_request SSE:', e);
+          // Auto-cancel to prevent scheduler from blocking for 5 minutes
+          pendingMap.delete(correlationId);
+          bus.publish({
+            type: MessageBusType.TOOL_CONFIRMATION_RESPONSE,
+            correlationId,
+            confirmed: false,
+            outcome: ToolConfirmationOutcome.Cancel,
+          });
         }
+      } else {
+        // No active SSE stream — auto-cancel to avoid blocking
+        console.warn('[gemini-core] No active SSE controller for permission_request, auto-cancelling');
+        pendingMap.delete(correlationId);
+        bus.publish({
+          type: MessageBusType.TOOL_CONFIRMATION_RESPONSE,
+          correlationId,
+          confirmed: false,
+          outcome: ToolConfirmationOutcome.Cancel,
+        });
       }
     }
   };
@@ -588,12 +738,22 @@ export async function resolveConfirmation(
   correlationId: string,
   approved: boolean,
 ): Promise<boolean> {
+  console.log(`[approval-debug] resolveConfirmation called: id=${correlationId.slice(0, 8)}... approved=${approved}`);
   const pendingMap = getPendingMap();
   const entry = pendingMap.get(correlationId);
-  if (!entry) return false;
-  if (!config) return false;
+  if (!entry) {
+    console.warn(`[approval-debug] ⚠ correlationId not found in pendingMap (already resolved or expired)`);
+    return false;
+  }
+  // Use the bus captured when the pending entry was created —
+  // this survives HMR module reloads (config resets to null but
+  // the bus in the closure/Scheduler is still alive).
+  const bus = entry.bus;
+  if (!bus) {
+    console.warn(`[approval-debug] ⚠ no bus on pending entry — cannot publish confirmation response`);
+    return false;
+  }
 
-  const bus = config.getMessageBus();
   await bus.publish({
     type: MessageBusType.TOOL_CONFIRMATION_RESPONSE,
     correlationId,
@@ -604,6 +764,7 @@ export async function resolveConfirmation(
       : ToolConfirmationOutcome.Cancel,
   });
   pendingMap.delete(correlationId);
+  console.log(`[approval-debug] ✅ Confirmation response published, tool should unblock now`);
   return true;
 }
 
@@ -717,68 +878,35 @@ function buildAetherPreamble(currentProjectTag?: string): string {
     lines.push(
       '',
       '## Memory System',
-      `Aether has an automatic memory system. The memory repository is at: \`${normPath}\``,
-      'You detect learnable moments during the conversation and write observations to the appropriate memory file using the edit tool (append a concise bullet point).',
-      'Aether intercepts writes to the memory repo and shows them to the user as a toast notification for approval. Git commits are auto-approved for the memory repo.',
+      `Aether has a memory system that uses Python scripts. You must use these scripts via the \`run_shell_command\` tool to record information.`,
+      `The memory repository is at: \`${normPath}\``,
       '',
-      '### Memory file targets',
-      `- \`${normPath}/environments/${envId}.md\` — machine/environment-specific quirks (shell behavior, paths, OS workarounds)`,
-      `- \`${normPath}/projects/<name>.md\` — project-specific learnings (default for most observations)`,
-      `- \`${normPath}/projects/_general.md\` — null-project staging: observations not tied to any specific project`,
-      `- \`${normPath}/me.md\` — user profile/communication preferences (rare, only for explicit user statements)`,
-      `- \`${normPath}/workflows.md\` — cross-project workflow patterns (rare, only for explicitly stated general rules)`,
+      '### `update_memory.py`',
+      '- **Purpose**: Records a new piece of information (a preference, fact, workflow, or status update) to the structured memory files.',
+      '- **Command**:',
+      '  ```bash',
+      `  python ${normPath}/../skills/memory/update_memory.py --file [file_target] --category "[Category Name]" --content "[Content to remember]"`,
+      '  ```',
+      '- **Arguments**:',
+      '  - `--file`: One of `me.md`, `workflows.md`, `project`, `environment`.',
+      '  - `--category`: The heading to place the memory under (e.g., "Working Style", "Status Update").',
+      '  - `--content`: The single bullet point of text to add.',
+      '  - `--project-name`: Required if `--file` is `project`.',
+      '  - `--environment-name`: Required if `--file` is `environment`.',
+      '  - `--source-turn-id`: The ID of the current turn.',
       '',
-      '### Triggers — detect these and write observations:',
-    );
-
-    if (enabledTriggers.includes('explicit_rules')) {
-      lines.push(
-        '- **Explicit rule**: User states a preference or rule ("always do X", "never do Y", "I prefer...")',
-        '  - Example: User says "Always use type annotations" → append `- Always use type annotations in Python code` to the project file',
-      );
-    }
-    if (enabledTriggers.includes('corrections')) {
-      lines.push(
-        '- **User correction**: User corrects your output (factual, stylistic, or procedural)',
-        '  - Example: User says "No, use pnpm not npm" → append `- Package manager: pnpm (not npm)` to the project file',
-      );
-    }
-    if (enabledTriggers.includes('error_recovery')) {
-      lines.push(
-        `- **Error→recovery**: A tool call fails, you retry with a different approach, and it succeeds`,
-        `  - Example: \`pip install\` fails, \`pip install --user\` works → append \`- pip requires --user flag on this machine\` to \`environments/${envId}.md\``,
-      );
-    }
-    if (enabledTriggers.includes('project_status')) {
-      lines.push(
-        '- **Project status change**: A key decision, milestone, or direction shift occurs',
-        '  - Example: "Let\'s switch from REST to GraphQL" → append `- [2024-02] Migrating API from REST to GraphQL` to the project file',
-      );
-    }
-    if (enabledTriggers.includes('project_shift')) {
-      lines.push(
-        '- **Turn-project shift**: Conversation transitions between projects — scan the completed block for higher-order lessons before moving on',
-        '  - Example: After 10 turns on project A, user switches to B → review A turns for any unrecorded patterns, emit observations, then proceed with B',
-      );
-    }
-
-    lines.push(
-      '',
-      '### Rules',
-      '- Keep observations concise — append a single bullet point to the relevant file',
-      '- Do NOT write noise — only genuinely learnable moments',
-      '- The memory system runs silently. Do not mention memory writes to the user unless asked.',
-      `- After writing observations, commit with: \`git -C ${normPath} add -A && git -C ${normPath} commit -m "auto: <brief description>"\``,
-      '- Do NOT push — Aether handles push timing.',
+      '- **Examples**:',
+      '  - User says "I prefer my plot titles to be larger" → You call `run_shell_command` with:',
+      `    \`python ${normPath}/../skills/memory/update_memory.py --file me.md --category "Data Analysis Style" --content "Prefers plot titles to be larger." --source-turn-id [id]\``,
+      '  - A project task is completed → You call `run_shell_command` with:',
+      `    \`python ${normPath}/../skills/memory/update_memory.py --file project --project-name "Aether" --category "Status" --content "Phase 1 of the structured memory system has been implemented." --source-turn-id [id]\``,
+      ''
     );
 
     const consolidationThreshold = parseInt(getSetting('memory_consolidation_threshold') || '15', 10);
     lines.push(
-      '',
       '### Consolidation',
-      `When a project file accumulates ${consolidationThreshold}+ observations, suggest a consolidation review:`,
-      '"The [project] memory file has accumulated N observations. Would you like me to run a consolidation pass — reviewing observations, promoting generalizable patterns to me.md/workflows.md, and compacting the rest?"',
-      'Only suggest this if you notice the file is large when reading it. Do not actively count or poll.',
+      `When a project file seems to have many observations, you can suggest a consolidation pass to the user.`,
     );
 
     if (customRules) {
@@ -1060,27 +1188,60 @@ function checkMemoryWrite(
   const memoryRepoPath = getSetting('memory_repo_path') || '';
   if (!memoryEnabled || !memoryRepoPath) return false;
 
-  // Check edit/write file tools
+  const normalizedMemoryPath = memoryRepoPath.replace(/\\/g, '/').toLowerCase();
+  let isMemoryWrite = false;
+  let observationDetails: Record<string, unknown> | null = null;
+
+  // 1. Check for direct file edits to the memory repo
   if (toolName === 'edit' || toolName === 'write_file') {
     const filePath = String(toolInput.file_path || toolInput.filePath || '');
     const normalizedFilePath = filePath.replace(/\\/g, '/').toLowerCase();
-    const normalizedMemoryPath = memoryRepoPath.replace(/\\/g, '/').toLowerCase();
+
     if (normalizedFilePath.startsWith(normalizedMemoryPath)) {
-      const autoApprove = getSetting('memory_auto_approve') === 'true';
-      try {
-        controller.enqueue(formatSSE({
-          type: 'memory_observation' as SSEEvent['type'],
-          data: JSON.stringify({
-            file: filePath,
-            tool: toolName,
-            auto_approve: autoApprove,
-          }),
-        }));
-      } catch {
-        // Controller may be closed
-      }
-      return true;
+      isMemoryWrite = true;
+      observationDetails = {
+        file: filePath,
+        tool: toolName,
+        content: String(toolInput.content || ''),
+      };
     }
+  }
+
+  // 2. Check for shell commands running the update_memory.py script
+  if (toolName === 'run_shell_command') {
+    const command = String(toolInput.command || '');
+    if (command.includes('update_memory.py')) {
+      isMemoryWrite = true;
+      // Naive parsing of the command string to extract arguments
+      const fileMatch = /--file\s+(\S+)/.exec(command);
+      const categoryMatch = /--category\s+"([^"]+)"/.exec(command);
+      const contentMatch = /--content\s+"([^"]+)"/.exec(command);
+      const projectMatch = /--project-name\s+"([^"]+)"/.exec(command);
+
+      observationDetails = {
+        tool: 'update_memory.py',
+        file: fileMatch ? fileMatch[1] : 'unknown',
+        category: categoryMatch ? categoryMatch[1] : 'unknown',
+        content: contentMatch ? contentMatch[1] : '',
+        project: projectMatch ? projectMatch[1] : undefined,
+      };
+    }
+  }
+
+  if (isMemoryWrite && observationDetails) {
+    const autoApprove = getSetting('memory_auto_approve') === 'true';
+    try {
+      controller.enqueue(formatSSE({
+        type: 'memory_observation' as SSEEvent['type'],
+        data: JSON.stringify({
+          ...observationDetails,
+          auto_approve: autoApprove,
+        }),
+      }));
+    } catch {
+      // Controller may be closed
+    }
+    return true;
   }
 
   return false;
@@ -1132,8 +1293,8 @@ export function createTagDetectionTransform(
             const event: { type: string; data: string } = JSON.parse(line.slice(6));
             if (event.type === 'text') {
               textSoFar += event.data;
-            } else if (event.type === 'tool_use') {
-              hasToolUse = true;
+            } else if (event.type === 'tool_use' || event.type === 'error' || event.type === 'done') {
+              hasToolUse = true; // flush immediately on tool_use, error, or done
             }
           } catch {
             // skip malformed
@@ -1262,6 +1423,8 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
 
       // Track the bus subscription so we can clean up
       let unsubscribeToolCallsUpdate: (() => void) | null = null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let autoApproveHandler: ((req: any) => void) | null = null;
 
       try {
         // Ensure Core is initialized
@@ -1341,6 +1504,37 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
         // Subscribe to TOOL_CALLS_UPDATE for confirmation forwarding to SSE
         unsubscribeToolCallsUpdate = _subscribeToolCallsUpdate(bus);
 
+        // ── Auto-approve intercept ──────────────────────────────────
+        // The PolicyEngine's checkShellCommand() can force ASK_USER when
+        // splitCommands() (tree-sitter) fails to parse the command, even
+        // if an auto-approve regex rule matched. This listener fires
+        // BEFORE the Scheduler's default "requiresUserConfirmation" listener
+        // (because we subscribe before creating the Scheduler), and
+        // auto-approves known safe commands at the MessageBus level.
+        autoApproveHandler = (request: {
+          correlationId: string;
+          toolCall?: { name: string; args?: Record<string, unknown> };
+        }) => {
+          if (request.toolCall?.name !== 'run_shell_command') return;
+          const cmd = String(request.toolCall.args?.command || '');
+          if (!cmd) return;
+          if (_isKnownSafeShellCommand(cmd)) {
+            console.log(`[approval-debug] 🟢 Auto-approving via MessageBus intercept: ${cmd.slice(0, 80)}`);
+            try {
+              void bus.publish({
+                type: MessageBusType.TOOL_CONFIRMATION_RESPONSE,
+                correlationId: request.correlationId,
+                confirmed: true,
+              });
+            } catch (e) {
+              console.warn('[approval-debug] ⚠ bus.publish failed in auto-approve handler:', e);
+            }
+          } else {
+            console.log(`[approval-debug] 🔴 Command NOT auto-approved, needs user confirmation: ${cmd.slice(0, 80)}`);
+          }
+        };
+        bus.subscribe(MessageBusType.TOOL_CONFIRMATION_REQUEST, autoApproveHandler);
+
         // Create the Scheduler for tool execution
         const scheduler = new Scheduler({
           config,
@@ -1362,6 +1556,7 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
           if (signal.aborted) break;
 
           // Stream a single model turn
+          console.log(`[gemini-core] Starting sendMessageStream for turn ${turnCount}...`);
           const toolCallRequests: ToolCallRequestInfo[] = [];
           const stream = client.sendMessageStream(queryParts, signal, promptId);
 
@@ -1438,7 +1633,13 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
 
           // Continue the conversation with tool results
           queryParts = responseParts;
+          // Log shape of continuation parts for debugging network errors
           console.log(`[gemini-core] Continuing with ${responseParts.length} response part(s), turn ${turnCount}`);
+          for (let i = 0; i < Math.min(responseParts.length, 3); i++) {
+            const rp = responseParts[i];
+            const keys = rp && typeof rp === 'object' ? Object.keys(rp) : ['(primitive)'];
+            console.log(`[gemini-core]   part[${i}] keys: ${keys.join(', ')}, type: ${typeof rp}`);
+          }
         }
 
         if (turnCount >= MAX_AGENT_TURNS) {
@@ -1455,24 +1656,53 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
       } catch (error) {
         const rawMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error('[gemini-core] Stream error:', rawMessage);
-        if (error instanceof Error && error.stack) {
-          console.error('[gemini-core] Stack:', error.stack);
+        // Log full error details for network error diagnosis
+        if (error instanceof Error) {
+          console.error('[gemini-core] Error name:', error.name);
+          if (error.stack) console.error('[gemini-core] Stack:', error.stack);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const anyErr = error as any;
+          if (anyErr.code) console.error('[gemini-core] Error code:', anyErr.code);
+          if (anyErr.status) console.error('[gemini-core] HTTP status:', anyErr.status);
+          if (anyErr.cause) console.error('[gemini-core] Cause:', anyErr.cause);
+        } else {
+          console.error('[gemini-core] Raw error object:', error);
         }
 
         let errorMessage = rawMessage;
 
-        // Add auth context hints
+        // Add context-specific hints
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const errAny = error as any;
         if (rawMessage.includes('not initialized') || rawMessage.includes('auth')) {
           errorMessage += '\n\nGemini authentication may have expired. Run `gemini auth login` in a terminal to re-authenticate.';
+        } else if (rawMessage.includes('quota') || rawMessage.includes('capacity') || errAny?.name === 'TerminalQuotaError') {
+          // Format the retry delay if available
+          const retryMs = errAny?.retryDelayMs;
+          if (retryMs && typeof retryMs === 'number') {
+            const mins = Math.ceil(retryMs / 60000);
+            errorMessage = `API quota exhausted. Try again in ~${mins} minute${mins === 1 ? '' : 's'}.`;
+          }
         }
 
-        controller.enqueue(formatSSE({ type: 'error', data: errorMessage }));
-        controller.enqueue(formatSSE({ type: 'done', data: '' }));
-        controller.close();
+        try {
+          controller.enqueue(formatSSE({ type: 'error', data: errorMessage }));
+          controller.enqueue(formatSSE({ type: 'done', data: '' }));
+          controller.close();
+        } catch (closeErr) {
+          console.warn('[gemini-core] Failed to send error SSE (controller may already be closed):', closeErr);
+        }
       } finally {
         // Unsubscribe from bus
         if (unsubscribeToolCallsUpdate) {
           unsubscribeToolCallsUpdate();
+        }
+        // Unsubscribe auto-approve intercept
+        if (autoApproveHandler && config) {
+          config.getMessageBus().unsubscribe(
+            MessageBusType.TOOL_CONFIRMATION_REQUEST,
+            autoApproveHandler,
+          );
         }
         // Clear active controller
         if (activeController === controller) {
