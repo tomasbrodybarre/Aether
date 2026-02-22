@@ -12,6 +12,13 @@ import {
   ArrowRight01Icon,
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { TaskList } from "@/components/project/TaskList";
 
@@ -56,7 +63,7 @@ interface WorkspacePanelProps {
 }
 
 // ---------------------------------------------------------------------------
-// DiffView — lightweight unified diff renderer
+// DiffView — full unified diff renderer (for dialog)
 // ---------------------------------------------------------------------------
 
 function DiffView({ diff }: { diff: string }) {
@@ -68,8 +75,8 @@ function DiffView({ diff }: { diff: string }) {
       : 0;
 
   return (
-    <div className="overflow-auto max-h-[50vh] rounded border border-border/30 bg-muted/20">
-      <pre className="text-[0.6875rem] leading-relaxed font-mono p-2 whitespace-pre-wrap break-words">
+    <div className="overflow-auto max-h-[70vh] rounded border border-border/30 bg-muted/20">
+      <pre className="text-xs leading-relaxed font-mono p-3 whitespace-pre-wrap break-words">
         {lines.slice(startIdx).map((line, i) => {
           let className = "text-muted-foreground/70";
           if (line.startsWith("@@")) {
@@ -86,6 +93,128 @@ function DiffView({ diff }: { diff: string }) {
           );
         })}
       </pre>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DiffSummary — parse diff into per-section change summaries
+// ---------------------------------------------------------------------------
+
+interface SectionChange {
+  section: string;
+  added: number;
+  removed: number;
+  /** First few added lines as preview */
+  preview: string[];
+}
+
+function parseDiffSummary(diff: string): { sections: SectionChange[]; totalAdded: number; totalRemoved: number } {
+  const lines = diff.split("\n");
+  const sections: SectionChange[] = [];
+  let currentSection = "General";
+  let currentAdded = 0;
+  let currentRemoved = 0;
+  let currentPreview: string[] = [];
+  let totalAdded = 0;
+  let totalRemoved = 0;
+
+  function flushSection() {
+    if (currentAdded > 0 || currentRemoved > 0) {
+      // Merge with existing section if same name
+      const existing = sections.find((s) => s.section === currentSection);
+      if (existing) {
+        existing.added += currentAdded;
+        existing.removed += currentRemoved;
+        if (existing.preview.length < 3) {
+          existing.preview.push(...currentPreview.slice(0, 3 - existing.preview.length));
+        }
+      } else {
+        sections.push({
+          section: currentSection,
+          added: currentAdded,
+          removed: currentRemoved,
+          preview: currentPreview.slice(0, 3),
+        });
+      }
+    }
+    currentAdded = 0;
+    currentRemoved = 0;
+    currentPreview = [];
+  }
+
+  for (const line of lines) {
+    // Skip diff headers
+    if (line.startsWith("---") || line.startsWith("+++") || line.startsWith("Index:") || line.startsWith("===")) continue;
+    // Hunk header — reset
+    if (line.startsWith("@@")) continue;
+
+    // Detect markdown section headings in both added and context lines
+    const headingMatch = line.match(/^[+ ]##\s+(.+)/);
+    if (headingMatch) {
+      flushSection();
+      currentSection = headingMatch[1].trim();
+      continue;
+    }
+
+    if (line.startsWith("+")) {
+      currentAdded++;
+      totalAdded++;
+      const text = line.slice(1).trim();
+      if (text && currentPreview.length < 3) {
+        currentPreview.push(text);
+      }
+    } else if (line.startsWith("-")) {
+      currentRemoved++;
+      totalRemoved++;
+    }
+  }
+  flushSection();
+
+  return { sections, totalAdded, totalRemoved };
+}
+
+function DiffSummaryView({ diff, stagingCount }: { diff: string; stagingCount: number }) {
+  const { sections, totalAdded, totalRemoved } = useMemo(() => parseDiffSummary(diff), [diff]);
+
+  return (
+    <div className="space-y-2">
+      {/* Overall stats */}
+      <div className="flex items-center gap-3 text-[0.625rem] text-muted-foreground/60">
+        <span>{stagingCount} observation{stagingCount !== 1 ? "s" : ""} processed</span>
+        <span className="text-green-400/70">+{totalAdded}</span>
+        <span className="text-red-400/70">&minus;{totalRemoved}</span>
+      </div>
+
+      {/* Per-section cards */}
+      <div className="space-y-1.5">
+        {sections.map((s, i) => (
+          <div
+            key={i}
+            className="rounded border border-border/30 bg-muted/20 px-2.5 py-2"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[0.6875rem] font-medium text-foreground/80 truncate">
+                {s.section}
+              </span>
+              <span className="text-[0.6rem] text-muted-foreground/50 shrink-0 ml-2">
+                {s.added > 0 && <span className="text-green-400/70">+{s.added}</span>}
+                {s.added > 0 && s.removed > 0 && " "}
+                {s.removed > 0 && <span className="text-red-400/70">&minus;{s.removed}</span>}
+              </span>
+            </div>
+            {s.preview.length > 0 && (
+              <div className="mt-1 space-y-0.5">
+                {s.preview.map((p, j) => (
+                  <p key={j} className="text-[0.625rem] text-muted-foreground/50 truncate">
+                    {p}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -119,6 +248,7 @@ export function WorkspacePanel({ width }: WorkspacePanelProps) {
   const [compactionResult, setCompactionResult] = useState<CompactionResult | null>(null);
   const [compactionError, setCompactionError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  const [diffDialogOpen, setDiffDialogOpen] = useState(false);
 
   // Promotion flow state
   const [promoting, setPromoting] = useState<string | null>(null); // project name
@@ -621,10 +751,10 @@ export function WorkspacePanel({ width }: WorkspacePanelProps) {
 
               {compactionResult && (
                 <>
-                  <p className="text-[0.625rem] text-muted-foreground/60">
-                    {compactionResult.stagingCount} observation{compactionResult.stagingCount !== 1 ? "s" : ""} compacted
-                  </p>
-                  <DiffView diff={compactionResult.diff} />
+                  <DiffSummaryView
+                    diff={compactionResult.diff}
+                    stagingCount={compactionResult.stagingCount}
+                  />
                   <div className="flex gap-2 pt-1">
                     <Button
                       size="sm"
@@ -644,6 +774,48 @@ export function WorkspacePanel({ width }: WorkspacePanelProps) {
                       Reject
                     </Button>
                   </div>
+                  <button
+                    onClick={() => setDiffDialogOpen(true)}
+                    className="w-full text-center text-[0.625rem] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors pt-0.5"
+                  >
+                    View full diff
+                  </button>
+
+                  {/* Full diff dialog */}
+                  <Dialog open={diffDialogOpen} onOpenChange={setDiffDialogOpen}>
+                    <DialogContent className="max-w-4xl w-[90vw]">
+                      <DialogHeader>
+                        <DialogTitle>
+                          Compaction diff: {compacting}
+                        </DialogTitle>
+                      </DialogHeader>
+                      <DiffView diff={compactionResult.diff} />
+                      <DialogFooter>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setDiffDialogOpen(false);
+                            handleApproveCompaction();
+                          }}
+                          disabled={applying}
+                          className="bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          {applying ? "Applying..." : "Approve"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setDiffDialogOpen(false);
+                            handleRejectCompaction();
+                          }}
+                          disabled={applying}
+                        >
+                          Reject
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 </>
               )}
             </div>
