@@ -930,6 +930,16 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
     const customRules = getSetting('memory_custom_rules') || '';
     const normPath = memoryRepoPath.replace(/\\/g, '/');
 
+    const consolidationThreshold = parseInt(getSetting('memory_consolidation_threshold') || '15', 10);
+
+    // Build trigger description from enabled categories
+    const triggerDescriptions: string[] = [];
+    if (enabledTriggers.includes('explicit_rules')) triggerDescriptions.push('User states "always/never X" → record the rule');
+    if (enabledTriggers.includes('corrections')) triggerDescriptions.push('User corrects your output → record the correction pattern');
+    if (enabledTriggers.includes('error_recovery')) triggerDescriptions.push('Tool call fails, retry succeeds with modified approach → record the fix');
+    if (enabledTriggers.includes('project_status')) triggerDescriptions.push('Project status changes (task completed, phase transition) → record the update');
+    if (enabledTriggers.includes('project_shift')) triggerDescriptions.push('Conversation shifts between projects → scan completed turns for lessons before moving on');
+
     lines.push(
       '',
       '## Memory System',
@@ -937,14 +947,15 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
       `The memory repository is at: \`${normPath}\``,
       '',
       '### `update_memory.py`',
-      '- **Purpose**: Records a new piece of information (a preference, fact, workflow, or status update) to the structured memory files.',
+      '- **Purpose**: Records a new piece of information (a preference, fact, workflow, or status update) to the memory files.',
+      '- **Important**: New observations should go to the **Staging** section of the relevant project file. Use `--category "Staging"` for project observations. Only write directly to named sections (e.g., "Status", "Key Decisions") when the information is a definitive status update, not an observation.',
       '- **Command**:',
       '  ```bash',
       `  python ${normPath}/../skills/memory/update_memory.py --file [file_target] --category "[Category Name]" --content "[Content to remember]"`,
       '  ```',
       '- **Arguments**:',
       '  - `--file`: One of `me.md`, `workflows.md`, `project`, `environment`.',
-      '  - `--category`: The heading to place the memory under (e.g., "Working Style", "Status Update").',
+      '  - `--category`: The heading to place the memory under. Use `"Staging"` for new project observations.',
       '  - `--content`: The single bullet point of text to add.',
       '  - `--project-name`: Required if `--file` is `project`.',
       '  - `--environment-name`: Required if `--file` is `environment`.',
@@ -953,16 +964,24 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
       '- **Examples**:',
       '  - User says "I prefer my plot titles to be larger" → You call `run_shell_command` with:',
       `    \`python ${normPath}/../skills/memory/update_memory.py --file me.md --category "Data Analysis Style" --content "Prefers plot titles to be larger." --source-turn-id [id]\``,
-      '  - A project task is completed → You call `run_shell_command` with:',
-      `    \`python ${normPath}/../skills/memory/update_memory.py --file project --project-name "Aether" --category "Status" --content "Phase 1 of the structured memory system has been implemented." --source-turn-id [id]\``,
-      ''
+      '  - A new pattern observed during a project → You call `run_shell_command` with:',
+      `    \`python ${normPath}/../skills/memory/update_memory.py --file project --project-name "Aether" --category "Staging" --content "BaseLlmClient from Core is the right tool for utility LLM calls." --source-turn-id [id]\``,
+      '',
     );
 
-    const consolidationThreshold = parseInt(getSetting('memory_consolidation_threshold') || '15', 10);
     lines.push(
       '### Consolidation',
-      `When a project file seems to have many observations, you can suggest a consolidation pass to the user.`,
+      `When a project's Staging section reaches ${consolidationThreshold} observations, Aether will prompt the user to consolidate. The consolidation process compacts staging observations into structured sections and promotes generally useful patterns to global files (me.md, workflows.md). You do not need to manage this — Aether handles it automatically.`,
     );
+
+    if (triggerDescriptions.length > 0) {
+      lines.push(
+        '',
+        '### Active memory triggers',
+        'Watch for these patterns and record observations when they occur:',
+        ...triggerDescriptions.map(t => `- ${t}`),
+      );
+    }
 
     if (customRules) {
       lines.push(

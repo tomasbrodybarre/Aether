@@ -5,10 +5,10 @@ import { usePathname } from "next/navigation";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { NavRail } from "./NavRail";
 import { ChatListPanel } from "./ChatListPanel";
-import { RightPanel } from "./RightPanel";
+import { WorkspacePanel } from "./WorkspacePanel";
 import { ResizeHandle } from "./ResizeHandle";
 import { DocPreview } from "./DocPreview";
-import { PanelContext, type PanelContent, type PreviewViewMode } from "@/hooks/usePanel";
+import { PanelContext, type PreviewViewMode } from "@/hooks/usePanel";
 
 const CHATLIST_MIN = 180;
 const CHATLIST_MAX = 400;
@@ -72,7 +72,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [isChatRoute]);
   const [panelOpen, setPanelOpenRaw] = useState(false);
-  const [panelContent, setPanelContent] = useState<PanelContent>("files");
   const [workingDirectory, setWorkingDirectory] = useState("");
   const [sessionId, setSessionId] = useState("");
   const [sessionTitle, setSessionTitle] = useState("");
@@ -161,8 +160,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     () => ({
       panelOpen,
       setPanelOpen,
-      panelContent,
-      setPanelContent,
       workingDirectory,
       setWorkingDirectory,
       sessionId,
@@ -178,7 +175,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       previewViewMode,
       setPreviewViewMode,
     }),
-    [panelOpen, setPanelOpen, panelContent, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, previewFile, setPreviewFile, previewViewMode]
+    [panelOpen, setPanelOpen, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, previewFile, setPreviewFile, previewViewMode]
   );
 
   return (
@@ -210,10 +207,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 width={docPreviewWidth}
               />
             )}
-            {isChatDetailRoute && panelOpen && (
+            {isChatDetailRoute && (
               <ResizeHandle side="right" onResize={handleRightPanelResize} onResizeEnd={handleRightPanelResizeEnd} />
             )}
-            {isChatDetailRoute && <RightPanel width={rightPanelWidth} />}
+            {isChatDetailRoute && <WorkspacePanel width={rightPanelWidth} />}
           </div>
         </TooltipProvider>
       </PanelContext.Provider>

@@ -483,6 +483,18 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
                         detail: memData.file,
                       });
                     }
+
+                    // Check if consolidation threshold is reached
+                    fetch('/api/memory').then(r => r.json()).then(memStatus => {
+                      if (memStatus.needs_consolidation && memStatus.consolidation_candidates?.length > 0) {
+                        const projects = memStatus.consolidation_candidates.join(', ');
+                        addToast({
+                          type: 'info',
+                          message: `Memory consolidation needed: ${projects}`,
+                          detail: `${memStatus.threshold}+ observations staged. Open the workspace panel to consolidate.`,
+                        });
+                      }
+                    }).catch(() => { /* silent */ });
                   } catch {
                     /* skip */
                   }

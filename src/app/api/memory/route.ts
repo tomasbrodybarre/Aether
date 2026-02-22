@@ -3,9 +3,30 @@ import { getSetting } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
+/** Count bullet points inside the ## Staging section only. Returns 0 if no staging section exists. */
+function countStagingBullets(content: string): number {
+  const lines = content.split('\n');
+  let inStaging = false;
+  let count = 0;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === '## Staging') {
+      inStaging = true;
+      continue;
+    }
+    if (inStaging && /^##\s/.test(trimmed)) {
+      break; // hit next section
+    }
+    if (inStaging && /^- /.test(trimmed)) {
+      count++;
+    }
+  }
+  return count;
+}
+
 /**
  * GET /api/memory — returns memory system status
- * - observation counts per project file
+ * - observation counts per project file (scoped to ## Staging section)
  * - whether consolidation threshold is reached for any project
  */
 export async function GET() {
@@ -30,16 +51,13 @@ export async function GET() {
       for (const file of files) {
         const filePath = path.join(projectsDir, file);
         const content = fs.readFileSync(filePath, 'utf-8');
-        // Count observation-like bullet points: lines starting with "- " after
-        // a section that looks like observations/learnings/staged
-        // Simple heuristic: count all bullet points in the file
-        const bulletLines = content.split('\n').filter(line => /^- /.test(line.trim()));
+        const count = countStagingBullets(content);
         const name = file.replace(/\.md$/, '');
         projects.push({
           name,
           file: filePath,
-          observation_count: bulletLines.length,
-          needs_consolidation: bulletLines.length >= threshold,
+          observation_count: count,
+          needs_consolidation: count >= threshold,
         });
       }
     }
@@ -57,11 +75,11 @@ export async function GET() {
       for (const file of files) {
         const filePath = path.join(envsDir, file);
         const content = fs.readFileSync(filePath, 'utf-8');
-        const bulletLines = content.split('\n').filter(line => /^- /.test(line.trim()));
+        const count = countStagingBullets(content);
         environments.push({
           name: file.replace(/\.md$/, ''),
           file: filePath,
-          observation_count: bulletLines.length,
+          observation_count: count,
         });
       }
     }

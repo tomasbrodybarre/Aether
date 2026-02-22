@@ -2,15 +2,11 @@
 
 import { createContext, useContext } from "react";
 
-export type PanelContent = "files" | "tasks";
-
 export type PreviewViewMode = "source" | "rendered";
 
 export interface PanelContextValue {
   panelOpen: boolean;
   setPanelOpen: (open: boolean) => void;
-  panelContent: PanelContent;
-  setPanelContent: (content: PanelContent) => void;
   workingDirectory: string;
   setWorkingDirectory: (dir: string) => void;
   sessionId: string;
