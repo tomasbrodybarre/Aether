@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import crypto from 'crypto';
-import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest } from '@/types';
+import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, TurnToolCall, TurnThought } from '@/types';
 
 const dataDir = process.env.CLAUDE_GUI_DATA_DIR || path.join(require('os').homedir(), '.codepilot');
 const DB_PATH = path.join(dataDir, 'codepilot.db');
@@ -132,6 +132,29 @@ function initDb(db: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_turns_project ON turns(project_tag, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_turns_created_at ON turns(created_at DESC);
+
+    -- Turn activity: persisted tool calls and thoughts
+    CREATE TABLE IF NOT EXISTS turn_tool_calls (
+      id TEXT PRIMARY KEY,
+      turn_id TEXT NOT NULL,
+      tool_call_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      tool_input TEXT,
+      result_content TEXT,
+      is_error INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_turn_tool_calls_turn ON turn_tool_calls(turn_id);
+
+    CREATE TABLE IF NOT EXISTS turn_thoughts (
+      id TEXT PRIMARY KEY,
+      turn_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_turn_thoughts_turn ON turn_thoughts(turn_id);
   `);
 
   // Run migrations for existing databases
@@ -255,6 +278,31 @@ function migrateDb(db: Database.Database): void {
   if (!turnColNames.includes('project_tag_source')) {
     db.exec("ALTER TABLE turns ADD COLUMN project_tag_source TEXT");
   }
+
+  // Ensure turn activity tables exist for databases created before this migration
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS turn_tool_calls (
+      id TEXT PRIMARY KEY,
+      turn_id TEXT NOT NULL,
+      tool_call_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      tool_input TEXT,
+      result_content TEXT,
+      is_error INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_turn_tool_calls_turn ON turn_tool_calls(turn_id);
+
+    CREATE TABLE IF NOT EXISTS turn_thoughts (
+      id TEXT PRIMARY KEY,
+      turn_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_turn_thoughts_turn ON turn_thoughts(turn_id);
+  `);
 
   // Migrate existing settings to a default provider if api_providers is empty
   const providerCount = db.prepare('SELECT COUNT(*) as count FROM api_providers').get() as { count: number };
@@ -615,6 +663,64 @@ export function deleteTask(id: string): boolean {
   const db = getDb();
   const result = db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
   return result.changes > 0;
+}
+
+// ==========================================
+// Turn Activity Operations (tool calls + thoughts)
+// ==========================================
+
+export function insertToolCall(
+  turnId: string,
+  toolCallId: string,
+  toolName: string,
+  toolInput?: string | null,
+): TurnToolCall {
+  const db = getDb();
+  const id = crypto.randomBytes(16).toString('hex');
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+
+  db.prepare(
+    'INSERT INTO turn_tool_calls (id, turn_id, tool_call_id, tool_name, tool_input, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(id, turnId, toolCallId, toolName, toolInput || null, now);
+
+  return db.prepare('SELECT * FROM turn_tool_calls WHERE id = ?').get(id) as TurnToolCall;
+}
+
+export function updateToolCallResult(
+  toolCallId: string,
+  content: string,
+  isError?: boolean,
+): void {
+  const db = getDb();
+  db.prepare(
+    'UPDATE turn_tool_calls SET result_content = ?, is_error = ? WHERE tool_call_id = ?'
+  ).run(content, isError ? 1 : 0, toolCallId);
+}
+
+export function insertThought(turnId: string, text: string): TurnThought {
+  const db = getDb();
+  const id = crypto.randomBytes(16).toString('hex');
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+
+  db.prepare(
+    'INSERT INTO turn_thoughts (id, turn_id, text, created_at) VALUES (?, ?, ?, ?)'
+  ).run(id, turnId, text, now);
+
+  return db.prepare('SELECT * FROM turn_thoughts WHERE id = ?').get(id) as TurnThought;
+}
+
+export function getToolCallsByTurn(turnId: string): TurnToolCall[] {
+  const db = getDb();
+  return db.prepare(
+    'SELECT * FROM turn_tool_calls WHERE turn_id = ? ORDER BY created_at ASC'
+  ).all(turnId) as TurnToolCall[];
+}
+
+export function getThoughtsByTurn(turnId: string): TurnThought[] {
+  const db = getDb();
+  return db.prepare(
+    'SELECT * FROM turn_thoughts WHERE turn_id = ? ORDER BY created_at ASC'
+  ).all(turnId) as TurnThought[];
 }
 
 // ==========================================

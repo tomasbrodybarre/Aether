@@ -20,7 +20,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
-import { TaskList } from "@/components/project/TaskList";
+import { ActivityFeed } from "@/components/project/ActivityFeed";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -227,16 +227,16 @@ export function WorkspacePanel({ width }: WorkspacePanelProps) {
   const { addToast } = useToast();
   const pathname = usePathname();
 
-  // Derive project tag from URL for task scoping
-  const taskSessionId = useMemo(() => {
+  // Derive project tag from URL for activity scoping
+  const projectTag = useMemo(() => {
     const match = pathname.match(/^\/project\/(.+)/);
     if (match) {
       const tag = decodeURIComponent(match[1]);
       if (tag !== "timeline" && tag !== "untagged" && tag !== "current") {
-        return `project:${tag}`;
+        return tag;
       }
     }
-    return "global";
+    return null;
   }, [pathname]);
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
   const lastNudgedCountsRef = useRef<Record<string, number>>({});
@@ -551,7 +551,7 @@ export function WorkspacePanel({ width }: WorkspacePanelProps) {
       className="hidden h-full shrink-0 flex-col overflow-hidden bg-background border-l border-border/30 lg:flex"
       style={{ width: width ?? 288 }}
     >
-      {/* ===== Top: Tasks ===== */}
+      {/* ===== Top: Activity ===== */}
       <div className="flex flex-col min-h-0 flex-1">
         <div className="flex h-10 shrink-0 items-center px-4">
           <HugeiconsIcon
@@ -559,11 +559,11 @@ export function WorkspacePanel({ width }: WorkspacePanelProps) {
             className="h-3.5 w-3.5 text-muted-foreground/60 mr-2"
           />
           <span className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">
-            Tasks
+            Activity
           </span>
         </div>
         <div className="flex-1 overflow-auto px-4 pb-2">
-          <TaskList sessionId={taskSessionId} />
+          <ActivityFeed projectTag={projectTag} />
         </div>
       </div>
 

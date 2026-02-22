@@ -7,7 +7,6 @@ import {
   MessageContent,
   MessageResponse,
 } from '@/components/ai-elements/message';
-import { ToolActionsGroup } from '@/components/ai-elements/tool-actions-group';
 import { CopyIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon } from 'lucide-react';
 import { FileAttachmentDisplay } from './FileAttachmentDisplay';
 import { ProjectTagEditor } from './ProjectTagEditor';
@@ -102,52 +101,6 @@ function parseToolBlocks(content: string): { text: string; tools: ToolBlock[] } 
   return { text: text.trim(), tools };
 }
 
-function pairTools(tools: ToolBlock[]): Array<{
-  name: string;
-  input: unknown;
-  result?: string;
-  isError?: boolean;
-}> {
-  const paired: Array<{
-    name: string;
-    input: unknown;
-    result?: string;
-    isError?: boolean;
-  }> = [];
-
-  const resultMap = new Map<string, ToolBlock>();
-  for (const t of tools) {
-    if (t.type === 'tool_result' && t.id) {
-      resultMap.set(t.id, t);
-    }
-  }
-
-  for (const t of tools) {
-    if (t.type === 'tool_use' && t.name) {
-      const result = t.id ? resultMap.get(t.id) : undefined;
-      paired.push({
-        name: t.name,
-        input: t.input,
-        result: result?.content,
-        isError: result?.is_error,
-      });
-    }
-  }
-
-  for (const t of tools) {
-    if (t.type === 'tool_result' && !tools.some(u => u.type === 'tool_use' && u.id === t.id)) {
-      paired.push({
-        name: 'tool_result',
-        input: {},
-        result: t.content,
-        isError: t.is_error,
-      });
-    }
-  }
-
-  return paired;
-}
-
 function parseMessageFiles(content: string): { files: FileAttachment[]; text: string } {
   const match = content.match(/^<!--files:(.*?)-->\n?/);
   if (!match) return { files: [], text: content };
@@ -236,8 +189,7 @@ const COLLAPSE_HEIGHT = 300;
 
 export function MessageItem({ message, blockNumber, allProjectTags, onTagChange }: MessageItemProps) {
   const isUser = message.role === 'user';
-  const { text, tools } = parseToolBlocks(message.content);
-  const pairedTools = pairTools(tools);
+  const { text } = parseToolBlocks(message.content);
 
   // Parse file attachments from user messages
   const { files, text: textWithoutFiles } = isUser
@@ -345,19 +297,6 @@ export function MessageItem({ message, blockNumber, allProjectTags, onTagChange 
           ) : (
             <MessageResponse>{displayText}</MessageResponse>
           )
-        )}
-
-        {/* Tool calls for assistant messages — compact collapsible group, below text */}
-        {!isUser && pairedTools.length > 0 && (
-          <ToolActionsGroup
-            tools={pairedTools.map((tool, i) => ({
-              id: `hist-${i}`,
-              name: tool.name,
-              input: tool.input,
-              result: tool.result,
-              isError: tool.isError,
-            }))}
-          />
         )}
 
       </MessageContent>

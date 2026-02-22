@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { streamGemini, createTagDetectionTransform } from '@/lib/gemini-core';
-import { addMessage, getSession, updateSessionTitle, getSetting, createTurn, updateTurnResponse, getRecentTurnContext } from '@/lib/db';
+import { addMessage, getSession, updateSessionTitle, getSetting, createTurn, updateTurnResponse, getRecentTurnContext, insertToolCall, updateToolCallResult, insertThought } from '@/lib/db';
 import type { SendMessageRequest, SSEEvent, TokenUsage, MessageContentBlock, FileAttachment } from '@/types';
 import fs from 'fs';
 import path from 'path';
@@ -313,7 +313,7 @@ const TAG_MARKER_SAFETY_RE = /<!--\s*project:\s*.+?\s*-->/g;
 
 /** Collect stream response and save to turns table */
 async function collectTurnResponse(stream: ReadableStream<string>, turnId: string) {
-  const { contentBlocks, tokenUsage } = await _collectStreamBlocks(stream);
+  const { contentBlocks, tokenUsage } = await _collectStreamBlocks(stream, turnId);
 
   if (contentBlocks.length > 0) {
     const hasToolBlocks = contentBlocks.some(
@@ -368,8 +368,9 @@ async function collectSessionResponse(stream: ReadableStream<string>, sessionId:
   }
 }
 
-/** Shared stream block collector — parses SSE events into content blocks */
-async function _collectStreamBlocks(stream: ReadableStream<string>): Promise<{
+/** Shared stream block collector — parses SSE events into content blocks.
+ *  When turnId is provided, tool calls and thoughts are persisted to the DB. */
+async function _collectStreamBlocks(stream: ReadableStream<string>, turnId?: string): Promise<{
   contentBlocks: MessageContentBlock[];
   tokenUsage: TokenUsage | null;
 }> {
@@ -405,6 +406,9 @@ async function _collectStreamBlocks(stream: ReadableStream<string>): Promise<{
                   name: toolData.name,
                   input: toolData.input,
                 });
+                if (turnId) {
+                  try { insertToolCall(turnId, toolData.id, toolData.name, JSON.stringify(toolData.input)); } catch { /* best effort */ }
+                }
               } catch {
                 // skip malformed tool_use data
               }
@@ -417,8 +421,21 @@ async function _collectStreamBlocks(stream: ReadableStream<string>): Promise<{
                   content: resultData.content,
                   is_error: resultData.is_error || false,
                 });
+                if (turnId) {
+                  try { updateToolCallResult(resultData.tool_use_id, resultData.content, resultData.is_error || false); } catch { /* best effort */ }
+                }
               } catch {
                 // skip malformed tool_result data
+              }
+            } else if (event.type === 'status') {
+              // Persist thoughts when we have a turnId
+              if (turnId) {
+                try {
+                  const statusData = JSON.parse(event.data);
+                  if (statusData.thought && statusData.text) {
+                    try { insertThought(turnId, statusData.text); } catch { /* best effort */ }
+                  }
+                } catch { /* not JSON or malformed */ }
               }
             } else if (event.type === 'result') {
               try {

@@ -437,6 +437,28 @@ export function formatFileSize(bytes: number): string {
 }
 
 // ==========================================
+// Turn Activity Types (tool calls + thoughts)
+// ==========================================
+
+export interface TurnToolCall {
+  id: string;
+  turn_id: string;
+  tool_call_id: string;
+  tool_name: string;
+  tool_input: string | null;
+  result_content: string | null;
+  is_error: number;
+  created_at: string;
+}
+
+export interface TurnThought {
+  id: string;
+  turn_id: string;
+  text: string;
+  created_at: string;
+}
+
+// ==========================================
 // Client Types
 // ==========================================
 

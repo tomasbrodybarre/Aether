@@ -288,6 +288,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
       abortControllerRef.current = controller;
 
       let accumulated = '';
+      let currentTurnId = '';
       const toolUsesAccum: ToolUseInfo[] = [];
       const toolResultsAccum: ToolResultInfo[] = [];
 
@@ -363,6 +364,9 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
                     if (!toolUsesAccum.some((t) => t.id === toolData.id)) {
                       toolUsesAccum.push(toolInfo);
                     }
+                    window.dispatchEvent(new CustomEvent('turn-activity', {
+                      detail: { type: 'tool_use', turnId: currentTurnId, id: toolData.id, name: toolData.name, input: toolData.input },
+                    }));
                   } catch {
                     /* skip */
                   }
@@ -379,6 +383,9 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
                     };
                     setToolResults((prev) => [...prev, resultInfo]);
                     toolResultsAccum.push(resultInfo);
+                    window.dispatchEvent(new CustomEvent('turn-activity', {
+                      detail: { type: 'tool_result', turnId: currentTurnId, tool_use_id: resultData.tool_use_id, content: resultData.content, is_error: resultData.is_error },
+                    }));
                   } catch {
                     /* skip */
                   }
@@ -407,7 +414,12 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
                 case 'status': {
                   try {
                     const statusData = JSON.parse(event.data);
-                    if (statusData.session_id) {
+                    if (statusData.thought && statusData.text) {
+                      setStatusText(statusData.text);
+                      window.dispatchEvent(new CustomEvent('turn-activity', {
+                        detail: { type: 'thought', turnId: currentTurnId, text: statusData.text },
+                      }));
+                    } else if (statusData.session_id) {
                       setStatusText(`Connected (${statusData.model || 'gemini'})`);
                       setTimeout(() => setStatusText(undefined), 2000);
                     } else if (statusData.tool_status) {
@@ -509,7 +521,13 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
 
                 case 'turn_created': {
                   // Custom event from turn-based flow with turn ID
-                  window.dispatchEvent(new CustomEvent('turn-created'));
+                  try {
+                    const turnData = JSON.parse(event.data);
+                    if (turnData.turn_id) currentTurnId = turnData.turn_id;
+                  } catch { /* skip */ }
+                  window.dispatchEvent(new CustomEvent('turn-created', {
+                    detail: { turnId: currentTurnId },
+                  }));
                   break;
                 }
 

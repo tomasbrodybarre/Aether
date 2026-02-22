@@ -6,7 +6,6 @@ import {
   MessageContent,
   MessageResponse,
 } from '@/components/ai-elements/message';
-import { ToolActionsGroup } from '@/components/ai-elements/tool-actions-group';
 import {
   Confirmation,
   ConfirmationTitle,
@@ -179,24 +178,6 @@ export function StreamingMessage({
           ) : (
             <MessageResponse>{content}</MessageResponse>
           )
-        )}
-
-        {/* Tool calls — compact collapsible group, below text */}
-        {toolUses.length > 0 && (
-          <ToolActionsGroup
-            tools={toolUses.map((tool) => {
-              const result = toolResults.find((r) => r.tool_use_id === tool.id);
-              return {
-                id: tool.id,
-                name: tool.name,
-                input: tool.input,
-                result: result?.content,
-                isError: result?.is_error,
-              };
-            })}
-            isStreaming={isStreaming}
-            streamingToolOutput={streamingToolOutput}
-          />
         )}
 
         {/* Permission approval confirmation */}
