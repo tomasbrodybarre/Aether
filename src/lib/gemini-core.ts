@@ -205,7 +205,13 @@ async function _doInit(targetDir: string): Promise<void> {
     });
 
     await config.initialize();
-    await config.refreshAuth(AuthType.LOGIN_WITH_GOOGLE);
+
+    // Use API key auth if GEMINI_API_KEY is set, otherwise OAuth
+    const authType = process.env.GEMINI_API_KEY
+      ? AuthType.USE_GEMINI
+      : AuthType.LOGIN_WITH_GOOGLE;
+    await config.refreshAuth(authType);
+    console.log(`[gemini-core] Auth method: ${authType}`);
 
     // -----------------------------------------------------------------
     // Auto-approve policy rules (user tier 2.x — overrides defaults)
@@ -1824,7 +1830,8 @@ export function getGeminiAuthInfo(): { authenticated: boolean; method: string } 
   if (!isInitialized || !config) {
     return { authenticated: false, method: 'none' };
   }
-  return { authenticated: true, method: 'google-oauth' };
+  const method = process.env.GEMINI_API_KEY ? 'api-key' : 'google-oauth';
+  return { authenticated: true, method };
 }
 
 /**
