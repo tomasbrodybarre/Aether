@@ -126,6 +126,7 @@ const MODE_OPTIONS: ModeOption[] = [
 
 // Fallback model options (used until /api/models responds)
 const FALLBACK_MODEL_OPTIONS = [
+  { value: 'gemini-3-pro', label: '3.0 Pro' },
   { value: 'gemini-2.5-pro', label: '2.5 Pro' },
   { value: 'gemini-2.5-flash', label: '2.5 Flash' },
 ];
@@ -800,7 +801,7 @@ export function MessageInput({
     item.label.toLowerCase().includes(popoverFilter.toLowerCase())
   );
 
-  const currentModelValue = modelName || 'opus';
+  const currentModelValue = modelName || MODEL_OPTIONS[0]?.value || 'gemini-3-pro';
   const currentModelOption = MODEL_OPTIONS.find((m) => m.value === currentModelValue) || MODEL_OPTIONS[0];
   const currentMode = MODE_OPTIONS.find((m) => m.value === mode) || MODE_OPTIONS[0];
 

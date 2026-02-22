@@ -92,12 +92,12 @@ export function ProjectTagEditor({
         <PopoverTrigger asChild>
           <button
             className={cn(
-              "inline-flex items-center gap-0.5 max-w-full rounded px-1 py-0.5 text-[0.625rem] leading-none transition-colors",
+              "inline-flex items-center gap-0.5 max-w-full rounded px-1 py-0.5 text-[0.9375rem] leading-none transition-colors",
               "hover:bg-accent/60 cursor-pointer",
               isManualOverride
                 ? "bg-violet-500/10 text-violet-400"
                 : currentTag
-                  ? "text-muted-foreground/50"
+                  ? "text-amber-400/70 dark:text-amber-400/70"
                   : "text-muted-foreground/30 hover:text-muted-foreground/60"
             )}
             onClick={(e) => {

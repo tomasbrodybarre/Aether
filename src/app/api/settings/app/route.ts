@@ -10,6 +10,7 @@ const ALLOWED_KEYS = [
   'anthropic_auth_token',
   'anthropic_base_url',
   'dangerously_skip_permissions',
+  'default_model',
   'font_size',
   'default_working_directory',
   'default_figure_width',

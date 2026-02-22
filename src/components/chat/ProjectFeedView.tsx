@@ -67,6 +67,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
   const currentPermission = permissionQueue[0] ?? null;
   const [streamingToolOutput, setStreamingToolOutput] = useState('');
   const [workingDir, setWorkingDir] = useState('');
+  const [allProjectTags, setAllProjectTags] = useState<string[]>([]);
   const [queuedMessage, setQueuedMessage] = useState<{ content: string; files?: FileAttachment[] } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const interruptRef = useRef(false);
@@ -99,9 +100,21 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
           setWorkingDir(defaultDir);
           setWorkingDirectory(defaultDir);
         }
+        const defaultMdl = data.settings?.default_model;
+        if (defaultMdl && !currentModel) {
+          setCurrentModel(defaultMdl);
+        }
       })
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch all project tags for the tag editor
+  useEffect(() => {
+    fetch('/api/turns/projects')
+      .then((r) => r.json())
+      .then((data) => setAllProjectTags(data.tags || []))
+      .catch(() => {});
+  }, []);
 
   // Re-sync streaming content when the window regains visibility
   useEffect(() => {
@@ -197,6 +210,40 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
       }, 600);
     },
     [currentPermission, setPendingApprovalSessionId]
+  );
+
+  const handleTurnTagChange = useCallback(
+    async (turnId: string, newTag: string | null) => {
+      // Optimistic: update project_tag on matching messages
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id.startsWith(turnId + '-')
+            ? { ...m, project_tag: newTag }
+            : m
+        )
+      );
+
+      try {
+        await fetch(`/api/turns/${turnId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project_tag: newTag,
+            project_tag_source: newTag !== null ? 'manual' : null,
+          }),
+        });
+        // Refresh tags list
+        const res = await fetch('/api/turns/projects');
+        if (res.ok) {
+          const data = await res.json();
+          setAllProjectTags(data.tags || []);
+        }
+        window.dispatchEvent(new CustomEvent('turn-updated'));
+      } catch {
+        // Best effort
+      }
+    },
+    []
   );
 
   const sendMessage = useCallback(
@@ -653,6 +700,8 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
         permissionResolved={permissionResolved}
         onForceStop={stopStreaming}
         contentWidth={contentWidth}
+        allProjectTags={allProjectTags}
+        onTagChange={handleTurnTagChange}
       />
       <MessageInput
         onSend={sendMessage}

@@ -58,7 +58,7 @@ async function handleTurnFlow(
   const { content, model, mode, files, project_tag, working_directory } = body;
 
   const effectiveMode = mode || 'code';
-  const effectiveModel = model || getSetting('default_model') || 'gemini-2.5-pro';
+  const effectiveModel = model || getSetting('default_model') || 'gemini-3-pro';
   const workDir = working_directory || getSetting('default_working_directory') || process.cwd();
 
   // Create the turn record with the effective model (so the UI can display it)

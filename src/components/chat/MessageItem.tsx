@@ -10,10 +10,15 @@ import {
 import { ToolActionsGroup } from '@/components/ai-elements/tool-actions-group';
 import { CopyIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon } from 'lucide-react';
 import { FileAttachmentDisplay } from './FileAttachmentDisplay';
+import { ProjectTagEditor } from './ProjectTagEditor';
 
 interface MessageItemProps {
   message: Message;
   blockNumber?: number;
+  /** All known project tags for the tag editor suggestion list */
+  allProjectTags?: string[];
+  /** Called when the user changes a turn's project tag */
+  onTagChange?: (turnId: string, newTag: string | null) => void;
 }
 
 interface ToolBlock {
@@ -42,7 +47,7 @@ function parseToolBlocks(content: string): { text: string; tools: ToolBlock[] } 
         content?: string;
         is_error?: boolean;
       }>;
-      
+
       for (const block of blocks) {
         if (block.type === 'text' && block.text) {
           text += block.text;
@@ -62,7 +67,7 @@ function parseToolBlocks(content: string): { text: string; tools: ToolBlock[] } 
           });
         }
       }
-      
+
       return { text: text.trim(), tools };
     } catch {
       // Not valid JSON, fall through to legacy parsing
@@ -191,8 +196,8 @@ function TokenUsageDisplay({ usage }: { usage: TokenUsage }) {
     : '';
 
   return (
-    <span className="group/tokens relative cursor-default text-xs text-muted-foreground/50">
-      <span>{totalTokens.toLocaleString()} tokens{costStr}</span>
+    <span className="group/tokens relative cursor-default text-[0.9375rem] text-muted-foreground/40">
+      <span>{totalTokens.toLocaleString()} tok{costStr}</span>
       <span className="pointer-events-none absolute bottom-full left-0 mb-1.5 whitespace-nowrap rounded-md bg-popover px-2.5 py-1.5 text-[0.6875rem] text-popover-foreground shadow-md border border-border/50 opacity-0 group-hover/tokens:opacity-100 transition-opacity duration-150 z-50">
         In: {usage.input_tokens.toLocaleString()} · Out: {usage.output_tokens.toLocaleString()}
         {usage.cache_read_input_tokens ? ` · Cache: ${usage.cache_read_input_tokens.toLocaleString()}` : ''}
@@ -202,9 +207,34 @@ function TokenUsageDisplay({ usage }: { usage: TokenUsage }) {
   );
 }
 
+/** Format a created_at timestamp in system timezone */
+function formatTimestamp(createdAt: string): string {
+  // DB stores UTC without 'Z' suffix — ensure it's parsed as UTC
+  const dateStr = createdAt.endsWith('Z') || createdAt.includes('+')
+    ? createdAt
+    : createdAt.includes('T')
+      ? createdAt + 'Z'
+      : createdAt + 'Z';
+  return new Date(dateStr).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** Extract turn ID from message ID (format: "turnId-user" or "turnId-assistant") */
+function extractTurnId(messageId: string): string | null {
+  const lastDash = messageId.lastIndexOf('-');
+  if (lastDash === -1) return null;
+  const suffix = messageId.slice(lastDash + 1);
+  if (suffix === 'user' || suffix === 'assistant') {
+    return messageId.slice(0, lastDash);
+  }
+  return null;
+}
+
 const COLLAPSE_HEIGHT = 300;
 
-export function MessageItem({ message, blockNumber }: MessageItemProps) {
+export function MessageItem({ message, blockNumber, allProjectTags, onTagChange }: MessageItemProps) {
   const isUser = message.role === 'user';
   const { text, tools } = parseToolBlocks(message.content);
   const pairedTools = pairTools(tools);
@@ -236,20 +266,36 @@ export function MessageItem({ message, blockNumber }: MessageItemProps) {
     }
   }
 
-  const timestamp = new Date(message.created_at).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  const timestamp = formatTimestamp(message.created_at);
+  const turnId = extractTurnId(message.id);
 
   return (
     <AIMessage from={isUser ? 'user' : 'assistant'}>
       <MessageContent>
-        {/* Block label for assistant messages */}
-        {!isUser && blockNumber !== undefined && (
-          <div className="flex items-center gap-1.5 mb-1 select-none">
-            <span className="text-[0.625rem] font-mono text-muted-foreground/40 bg-muted/30 px-1.5 py-0.5 rounded">
-              Out[{blockNumber}]
-            </span>
+        {/* Turn header for assistant messages — always visible */}
+        {!isUser && (
+          <div className="flex items-center gap-2 mb-1 select-none flex-wrap">
+            {blockNumber !== undefined && (
+              <span className="text-[0.9375rem] font-mono text-muted-foreground/40 bg-muted/30 px-1.5 py-0.5 rounded">
+                Out[{blockNumber}]
+              </span>
+            )}
+            <span className="text-[0.9375rem] text-muted-foreground/40">{timestamp}</span>
+            {message.model && (
+              <span className="text-[0.9375rem] font-mono text-sky-400/70 dark:text-sky-400/70">{message.model}</span>
+            )}
+            {tokenUsage && <TokenUsageDisplay usage={tokenUsage} />}
+            {allProjectTags && onTagChange && turnId && (
+              <ProjectTagEditor
+                currentTag={message.project_tag || ''}
+                isManualOverride={false}
+                autoTag=""
+                allTags={allProjectTags}
+                onTagChange={(newTag) => onTagChange(turnId, newTag)}
+                variant="sidebar"
+              />
+            )}
+            {displayText && <CopyButton text={displayText} />}
           </div>
         )}
 
@@ -316,15 +362,12 @@ export function MessageItem({ message, blockNumber }: MessageItemProps) {
 
       </MessageContent>
 
-      {/* Footer with copy, timestamp, model, and token usage */}
-      <div className={`flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 ${isUser ? 'justify-end' : ''}`}>
-        {!isUser && <span className="text-xs text-muted-foreground/50">{timestamp}</span>}
-        {!isUser && message.model && (
-          <span className="text-[0.625rem] text-muted-foreground/40 font-mono">{message.model}</span>
-        )}
-        {!isUser && tokenUsage && <TokenUsageDisplay usage={tokenUsage} />}
-        {displayText && <CopyButton text={displayText} />}
-      </div>
+      {/* Copy button for user messages (hover-only) */}
+      {isUser && displayText && (
+        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 justify-end">
+          <CopyButton text={displayText} />
+        </div>
+      )}
     </AIMessage>
   );
 }

@@ -37,6 +37,10 @@ interface MessageListProps {
   permissionResolved?: 'allow' | 'deny' | null;
   onForceStop?: () => void;
   contentWidth?: number;
+  /** All known project tags for the tag editor suggestion list */
+  allProjectTags?: string[];
+  /** Called when the user changes a turn's project tag */
+  onTagChange?: (turnId: string, newTag: string | null) => void;
 }
 
 export function MessageList({
@@ -53,6 +57,8 @@ export function MessageList({
   permissionResolved,
   onForceStop,
   contentWidth = 100,
+  allProjectTags,
+  onTagChange,
 }: MessageListProps) {
   if (messages.length === 0 && !isStreaming) {
     return (
@@ -78,7 +84,7 @@ export function MessageList({
             ? messages.slice(0, index + 1).filter(m => m.role === 'assistant').length
             : undefined;
           return (
-            <MessageItem key={message.id} message={message} blockNumber={blockNumber} />
+            <MessageItem key={message.id} message={message} blockNumber={blockNumber} allProjectTags={allProjectTags} onTagChange={onTagChange} />
           );
         })}
 

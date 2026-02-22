@@ -81,6 +81,12 @@ function SettingsPageInner() {
   const [showSkipPermWarning, setShowSkipPermWarning] = useState(false);
   const [skipPermSaving, setSkipPermSaving] = useState(false);
 
+  // Default model state
+  const [defaultModel, setDefaultModel] = useState('');
+  const [defaultModelSaving, setDefaultModelSaving] = useState(false);
+  const [defaultModelSaved, setDefaultModelSaved] = useState(false);
+  const [modelOptions, setModelOptions] = useState<{ value: string; label: string }[]>([]);
+
   // Font size state
   const [fontSize, setFontSize] = useState(100);
   const [fontSizeSaving, setFontSizeSaving] = useState(false);
@@ -144,6 +150,9 @@ function SettingsPageInner() {
         const data = await res.json();
         const appSettings = data.settings || {};
         setSkipPermissions(appSettings.dangerously_skip_permissions === "true");
+        if (appSettings.default_model) {
+          setDefaultModel(appSettings.default_model);
+        }
         if (appSettings.font_size) {
           setFontSize(parseInt(appSettings.font_size, 10) || 100);
         }
@@ -180,10 +189,29 @@ function SettingsPageInner() {
     }
   }, []);
 
+  // Fetch available models from Core library
+  const fetchModels = useCallback(async () => {
+    try {
+      const res = await fetch('/api/models');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.models && data.models.length > 0) {
+          setModelOptions(data.models.map((m: { value: string; label: string }) => ({
+            value: m.value,
+            label: m.label,
+          })));
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => {
     fetchSettings();
     fetchAppSettings();
-  }, [fetchSettings, fetchAppSettings]);
+    fetchModels();
+  }, [fetchSettings, fetchAppSettings, fetchModels]);
 
   const hasChanges =
     JSON.stringify(settings) !== JSON.stringify(originalSettings);
@@ -297,6 +325,26 @@ function SettingsPageInner() {
       // ignore
     } finally {
       setContentWidthSaving(false);
+    }
+  };
+
+  const saveDefaultModel = async (model: string) => {
+    setDefaultModelSaving(true);
+    try {
+      const res = await fetch("/api/settings/app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ settings: { default_model: model } }),
+      });
+      if (res.ok) {
+        setDefaultModel(model);
+        setDefaultModelSaved(true);
+        setTimeout(() => setDefaultModelSaved(false), 2000);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setDefaultModelSaving(false);
     }
   };
 
@@ -509,6 +557,49 @@ function SettingsPageInner() {
                   >
                     Reset
                   </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Default Model */}
+          <div className="rounded-lg border border-border/50 p-4 transition-shadow hover:shadow-sm">
+            <h2 className="text-sm font-medium">Default Model</h2>
+            <p className="mb-4 text-xs text-muted-foreground">
+              The Gemini model used for new conversations. Can be overridden per-conversation from the chat input bar.
+            </p>
+            <div className="space-y-3">
+              {modelOptions.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {modelOptions.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => saveDefaultModel(opt.value)}
+                      disabled={defaultModelSaving}
+                      className={`rounded-md border px-2.5 py-1 text-xs font-mono transition-colors ${
+                        (defaultModel || 'gemini-3-pro') === opt.value
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border/50 text-muted-foreground hover:border-border hover:text-foreground"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground italic">Loading models...</p>
+              )}
+              <div className="flex items-center gap-3">
+                {defaultModel && defaultModel !== 'gemini-3-pro' && (
+                  <button
+                    onClick={() => saveDefaultModel('')}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Reset to default (3.0 Pro)
+                  </button>
+                )}
+                {defaultModelSaved && (
+                  <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
                 )}
               </div>
             </div>

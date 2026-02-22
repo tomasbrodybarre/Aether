@@ -166,7 +166,7 @@ export async function initGeminiCore(targetDir?: string): Promise<void> {
 async function _doInit(targetDir: string): Promise<void> {
   try {
     const cwd = targetDir;
-    const model = getSetting('default_model') || 'gemini-2.5-pro';
+    const model = getSetting('default_model') || 'gemini-3-pro';
 
     // Process aether:init directives from GEMINI.md files.
     // This runs exec: commands (e.g. git pull) and pre-reads files
@@ -1548,7 +1548,7 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
         controller.enqueue(formatSSE({
           type: 'status',
           data: JSON.stringify({
-            model: model || getSetting('default_model') || 'gemini-2.5-pro',
+            model: model || getSetting('default_model') || 'gemini-3-pro',
             backend: 'gemini-core',
           }),
         }));
