@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { usePathname } from "next/navigation";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   CheckListIcon,
@@ -12,6 +13,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
+import { TaskList } from "@/components/project/TaskList";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,6 +96,19 @@ function DiffView({ diff }: { diff: string }) {
 
 export function WorkspacePanel({ width }: WorkspacePanelProps) {
   const { addToast } = useToast();
+  const pathname = usePathname();
+
+  // Derive project tag from URL for task scoping
+  const taskSessionId = useMemo(() => {
+    const match = pathname.match(/^\/project\/(.+)/);
+    if (match) {
+      const tag = decodeURIComponent(match[1]);
+      if (tag !== "timeline" && tag !== "untagged" && tag !== "current") {
+        return `project:${tag}`;
+      }
+    }
+    return "global";
+  }, [pathname]);
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
   const lastNudgedCountsRef = useRef<Record<string, number>>({});
   const hasNudgedOnMountRef = useRef(false);
@@ -418,9 +433,7 @@ export function WorkspacePanel({ width }: WorkspacePanelProps) {
           </span>
         </div>
         <div className="flex-1 overflow-auto px-4 pb-2">
-          <p className="text-xs text-muted-foreground/40 italic">
-            No active tasks
-          </p>
+          <TaskList sessionId={taskSessionId} />
         </div>
       </div>
 
