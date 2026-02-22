@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Call LLM
-    const baseLlm = getBaseLlmClient();
+    const baseLlm = await getBaseLlmClient();
     const response = await baseLlm.generateContent({
       modelConfigKey: { model: 'gemini-2.5-flash' },
       contents: [{

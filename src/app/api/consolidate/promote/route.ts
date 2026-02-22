@@ -104,7 +104,7 @@ export async function POST(req: NextRequest) {
     const projectName = path.basename(projectFile, '.md');
 
     // Call LLM with structured JSON output
-    const baseLlm = getBaseLlmClient();
+    const baseLlm = await getBaseLlmClient();
     const result = await baseLlm.generateJson({
       modelConfigKey: { model: 'gemini-2.5-flash' },
       contents: [{
