@@ -10,34 +10,50 @@ Built on [Gemini CLI Core](https://github.com/anthropics/gemini-cli) (`@google/g
 
 ## Features
 
-- **Project-based workspace** — turns organized by project with auto-tagging via LLM inference. Sidebar shows project tabs, not sessions
+### Core
+
+- **Project-based workspace** — turns organized by project with auto-tagging via LLM inference. Tag inheritance from recent turns, with model override on topic change. Timeline, Untagged, and per-project views.
 - **Streaming responses** — real-time token streaming with Markdown, syntax-highlighted code blocks, and tool-call visualization
 - **Inline images** — figures saved by the agent (matplotlib, seaborn, etc.) render directly in the conversation via markdown image syntax
-- **Rich text rendering** — LaTeX (KaTeX), tables (GFM), Mermaid diagrams, all via Streamdown
+- **Rich text rendering** — LaTeX (KaTeX), tables (GFM with copy/download), Mermaid diagrams, all via Streamdown
 - **Tool execution** — full agent loop with tool scheduling, live shell output streaming, and configurable auto-approve policies
-- **Permission controls** — approve, deny, or auto-allow tool use per action. Read-only tools, file edits, and dev tool commands auto-approved by default
+- **Permission controls** — approve, deny, or auto-allow tool use per action. Read-only tools, file edits, and dev tool commands auto-approved by default. Serial queue with (N/M) badge for parallel tool requests.
 - **Message queue & interrupt** — type follow-ups while streaming, interrupt with Escape to force immediate handover
-- **Model selector** — switch between Gemini models (3.1 Pro, 2.5 Pro/Flash, etc.) mid-conversation
+- **Model selector** — switch between Gemini models (3.1 Pro, 2.5 Pro/Flash, etc.) mid-conversation. Model persisted per turn.
+- **Context injection** — last 5 turns injected into preamble for continuity, project-scoped when tagged
+
+### Memory & Consolidation
+
+- **Memory observation system** — auto-learns from conversations: user corrections, error-recovery patterns, explicit rules, project status changes. Observations stored in project-scoped markdown files in a git-backed memory repo.
+- **Two-phase consolidation** — triggered from the workspace panel:
+  1. **Compact** — LLM folds staging observations into the project file's structured sections. Reviewed via per-section summary cards with "View full diff" dialog.
+  2. **Promote** — LLM identifies project-independent patterns and proposes them as additions to global memory files (`me.md`, `workflows.md`). Per-item approve/skip review with target file, section, and rationale.
+- **Git-backed persistence** — each approval step produces a git commit + push. Two commits per full consolidation cycle.
+
+### Extensions
+
 - **MCP server management** — configure Model Context Protocol servers (stdio, sse, http)
 - **Custom skills** — reusable prompt-based skills invoked as slash commands
-- **Memory system** (phase 1) — auto-learn from conversations with trigger detection, project-scoped observations, and consolidation
-- **Settings editor** — visual and JSON editors for `~/.gemini/settings.json`
+- **Settings editor** — visual and JSON editors for `~/.gemini/settings.json` and Aether-specific settings
+
+### Status & Monitoring
+
+- **Connection status** — pill indicator grounded to actual model health: green on successful responses, red on errors (quota, traffic, auth). Shows auth method (API Key / Google OAuth).
 - **Dark / Light theme** — one-click toggle
 - **Legacy session import** — import old Claude Code CLI sessions (`.jsonl`) into Aether's turn model
-
----
 
 ## Prerequisites
 
 | Requirement | Minimum version |
 |---|---|
 | **Node.js** | 18+ |
-| **Gemini CLI** | Authenticated (`gemini auth login`) |
 | **npm** | 9+ (ships with Node 18) |
 
-> Aether uses `@google/gemini-cli-core` in-process — no subprocess spawning. Auth is shared with the Gemini CLI via `gemini auth login`.
+**Authentication** (one of):
+- Gemini CLI authenticated via `gemini auth login`, or
+- `GEMINI_API_KEY` environment variable set in `.env.local`
 
----
+> Aether uses `@google/gemini-cli-core` in-process — no subprocess spawning. OAuth credentials are shared with the Gemini CLI.
 
 ## Quick Start
 
@@ -52,34 +68,28 @@ npm run dev
 
 Then open [http://localhost:3000](http://localhost:3000).
 
----
+### API Key Auth (alternative to OAuth)
 
-## Aether v1.1 Roadmap: Gemini Thought Persistence
+Create `.env.local` in the project root:
 
-The current implementation has a bug where Gemini's thought processes are displayed as raw JSON and disappear after the stream ends. The next version will parse, display, and persist these thoughts correctly.
+```
+GEMINI_API_KEY=your_api_key_here
+```
 
-- **New SSE Event Type**: A dedicated `'thought'` event will be emitted from the backend.
-- **Frontend Accumulation**: Thoughts will be collected in the UI and displayed in a collapsible "Reasoning" component during and after streaming.
-- **Data Persistence**: Thoughts will be saved as part of the message content in the database, ensuring they are available across sessions.
-
-This involves changes across the stack: updating TypeScript types, modifying the backend SSE mapping, enhancing the frontend SSE handler, and adapting the `StreamingMessage` and `MessageItem` components to render the `Reasoning` component.
-
----
+This is auto-detected at startup. No other configuration needed.
 
 ## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Framework | [Next.js 16](https://nextjs.org/) (App Router) |
+| Framework | [Next.js 16](https://nextjs.org/) (App Router) + React 19 |
 | UI components | [Radix UI](https://www.radix-ui.com/) + [shadcn/ui](https://ui.shadcn.com/) |
 | Styling | [Tailwind CSS 4](https://tailwindcss.com/) |
 | LLM backend | [@google/gemini-cli-core](https://www.npmjs.com/package/@google/gemini-cli-core) (in-process agent loop) |
-| Database | [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) (embedded, per-user) |
+| Database | [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) (embedded, WAL mode) |
 | Markdown | [Streamdown](https://github.com/nicholasgasior/streamdown) + KaTeX + Shiki + Mermaid |
 | Streaming | Server-Sent Events (SSE) |
 | Icons | [Hugeicons](https://hugeicons.com/) + [Lucide](https://lucide.dev/) |
-
----
 
 ## Project Structure
 
@@ -92,10 +102,17 @@ aether/
 │   │   ├── extensions/      # Skills + MCP server management
 │   │   ├── settings/        # Settings editor
 │   │   └── api/             # REST + SSE endpoints
+│   │       ├── chat/        # Streaming chat + permission handling
+│   │       ├── consolidate/ # Memory compaction + promotion
+│   │       ├── turns/       # Turn CRUD + project listing
+│   │       ├── memory/      # Memory status + observation counts
+│   │       ├── files/       # File serving, browsing, preview
+│   │       ├── tasks/       # Task persistence
+│   │       └── ...          # Models, settings, skills, plugins
 │   ├── components/
 │   │   ├── ai-elements/     # Message bubbles, code blocks, tool calls
 │   │   ├── chat/            # ProjectFeedView, MessageList, MessageInput
-│   │   ├── layout/          # AppShell, NavRail, ChatListPanel
+│   │   ├── layout/          # AppShell, NavRail, WorkspacePanel, ConnectionStatus
 │   │   ├── plugins/         # MCP server list & editor
 │   │   ├── project/         # FileTree, FilePreview, TaskList
 │   │   ├── skills/          # SkillsManager, SkillEditor
@@ -103,14 +120,66 @@ aether/
 │   ├── hooks/               # Custom React hooks
 │   ├── lib/                 # Core logic (gemini-core, DB, files, permissions)
 │   └── types/               # TypeScript interfaces
-├── docs/                    # Architecture docs (migration notes)
-├── public/                  # Static assets (logo, etc.)
-├── assets/                  # Source assets
-├── package.json
-└── tsconfig.json
+├── public/                  # Static assets
+└── package.json
 ```
 
----
+## Architecture
+
+Aether imports `@google/gemini-cli-core` as a library — no subprocess spawning. The agent loop runs in the Next.js server process:
+
+1. **Frontend** sends user prompt via POST to `/api/chat`
+2. **gemini-core.ts** creates a `Turn`, builds a preamble (environment info, memory context, recent turns, tagging instructions), and streams events from `GeminiClient.sendMessageStream()`
+3. **Tool execution** via Core's `Scheduler` class — handles tool calls, confirmations, and multi-turn loops (up to 25 turns)
+4. **SSE stream** maps Core events to frontend-compatible format (text, tool_use, tool_result, permission_request, etc.)
+5. **Tag detection transform** scans the first 300 chars of model output for `<!-- project: TagName -->` markers, updates the turn's project tag in the database
+6. **PolicyEngine** controls auto-approve rules — read-only tools, file edits, dev commands auto-approved; destructive ops require confirmation
+7. **Model health tracking** records success/failure of each streaming request, surfaced in the ConnectionStatus indicator
+
+### Memory System
+
+The memory system uses a git-backed repository of markdown files:
+
+- **`projects/<name>.md`** — per-project files with structured sections (Status, Key Decisions, Session Log, TODO) and a `## Staging` area for new observations
+- **`me.md`** — personal preferences and patterns (global)
+- **`workflows.md`** — reusable workflow patterns (global)
+
+The agent writes observations to staging via a `update_memory.py` tool. The consolidation pipeline (compact then promote) is triggered manually from the WorkspacePanel and uses `BaseLlmClient` (gemini-2.5-flash) for LLM analysis.
+
+## Configuration
+
+### Shared with Gemini CLI
+
+- `~/.gemini/settings.json` — model selection, MCP servers, auth
+- `~/.gemini/GEMINI.md` — system instructions (loaded hierarchically: global + project-level)
+- `~/.gemini/skills/` — custom skills directory
+
+### Aether-specific
+
+Stored in SQLite (`~/.codepilot/codepilot.db`):
+
+| Setting | Default | Description |
+|---|---|---|
+| `content_width` | 100% | Chat column width (50-100%) |
+| `font_size` | 100% | Base font size (75-150%) |
+| `default_working_directory` | cwd | Default for new turns |
+| `memory_enabled` | false | Enable memory observation system |
+| `memory_repo_path` | — | Path to git-backed memory repository |
+| `consolidation_threshold` | 15 | Observations before nudge toast |
+
+### `<!-- aether:init -->` Directives
+
+GEMINI.md files can include Aether-specific startup directives:
+
+```markdown
+<!-- aether:init
+exec: git -C /path/to/repo pull       # Run once per server lifecycle
+read: /path/to/context.md             # Pre-load into system prompt
+-->
+```
+
+- `exec:` commands run once (deduplicated across restarts within the same process)
+- `read:` files are injected into the preamble as pre-loaded context
 
 ## Development
 
@@ -120,31 +189,6 @@ npm run build     # Production build
 npm start         # Start production server
 ```
 
-### Notes
-
-- Chat data stored in `~/.codepilot/codepilot.db` (SQLite, WAL mode for concurrent reads during streaming)
-- Configuration at `~/.gemini/settings.json` (shared with Gemini CLI)
-- `GEMINI.md` files loaded hierarchically: `~/.gemini/GEMINI.md` + project-level
-- `<!-- aether:init -->` directive blocks in GEMINI.md for startup commands (`exec:`) and file pre-loading (`read:`)
-
----
-
-## Architecture
-
-Aether imports `@google/gemini-cli-core` as a library — no subprocess spawning. The agent loop runs in the Next.js server process:
-
-1. **Frontend** sends user prompt via POST to `/api/chat`
-2. **gemini-core.ts** creates a `Turn`, streams events from `GeminiClient.sendMessageStream()`
-3. **Tool execution** via Core's `Scheduler` class — handles tool calls, confirmations, and multi-turn loops
-4. **SSE stream** maps Core events to frontend-compatible format (text, tool_use, tool_result, permission_request, etc.)
-5. **PolicyEngine** controls auto-approve rules — read-only tools, file edits, dev commands auto-approved; destructive ops require confirmation
-
----
-
 ## License
 
 MIT — forked from [CodePilot](https://github.com/op7418/CodePilot) by op7418.
-
-
-## Memory Consolidation (2026-02-21 22:36:29)
-- This is a test staging item.
