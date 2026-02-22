@@ -58,7 +58,7 @@ Built on [Gemini CLI Core](https://github.com/anthropics/gemini-cli) (`@google/g
 ## Quick Start
 
 ```bash
-git clone https://github.com/m3t-research/Aether.git
+git clone https://github.com/tomasbrodybarre/Aether.git
 cd Aether
 git checkout gemini-migration
 

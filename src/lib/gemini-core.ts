@@ -329,26 +329,31 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   //    Strategy: explicit allowlist of safe command prefixes.
   //    Anything not matched falls through to default ASK_USER.
 
-  // 6a. Memory/skills git operations (existing)
+  // 6a. Memory/skills git operations — uses configured memory_repo_path
   const safeGitOps = [
     'pull', 'fetch', 'status', 'log', 'diff', 'add', 'commit', 'push',
     'rev-parse', 'branch', 'remote',
   ].join('|');
-  const memoryRepoPatterns = [
-    'C:/agent-hub/memory',
-    'C:\\\\agent-hub\\\\memory',
-    'C:/agent-hub/skills',
-    'C:\\\\agent-hub\\\\skills',
-  ].map(p => p.replace(/[/\\]/g, '[\\\\/\\\\\\\\]')).join('|');
+  const memoryRepoPath = getSetting('memory_repo_path');
+  if (memoryRepoPath) {
+    // Build patterns for both forward-slash and backslash variants
+    const memDir = path.dirname(memoryRepoPath);
+    const repoPatterns = [
+      memoryRepoPath,
+      memoryRepoPath.replace(/\//g, '\\\\'),
+      path.join(memDir, 'skills'),
+      path.join(memDir, 'skills').replace(/\//g, '\\\\'),
+    ].map(p => p.replace(/[/\\]/g, '[\\\\/\\\\\\\\]')).join('|');
 
-  pe.addRule({
-    toolName: 'run_shell_command',
-    decision: PolicyDecision.ALLOW,
-    priority: PRIORITY,
-    argsPattern: new RegExp(`git\\s+-C\\s+(${memoryRepoPatterns})\\s+(${safeGitOps})`),
-    source: `${SOURCE} (memory/skills git)`,
-  });
-  ruleCount++;
+    pe.addRule({
+      toolName: 'run_shell_command',
+      decision: PolicyDecision.ALLOW,
+      priority: PRIORITY,
+      argsPattern: new RegExp(`git\\s+-C\\s+(${repoPatterns})\\s+(${safeGitOps})`),
+      source: `${SOURCE} (memory/skills git)`,
+    });
+    ruleCount++;
+  }
 
   // 6b. Read-only shell commands
   const readOnlyCmds = [
@@ -503,8 +508,13 @@ function _isKnownSafeShellCommand(cmd: string): boolean {
   const fullPathSafe = /[\\/](python|python3|python\.exe|node|node\.exe|npm|npm\.cmd|npx|npx\.cmd|pip|pip3|git|git\.exe|powershell\.exe|pwsh|pwsh\.exe|tsc|tsx|code|dotnet|cargo)\s/i;
   if (fullPathSafe.test(trimmed)) return true;
 
-  // Memory/skills repo operations (match paths)
-  if (/agent-hub[\\/](memory|skills)/i.test(trimmed)) return true;
+  // Memory/skills repo operations — match configured memory repo path
+  const memRepo = getSetting('memory_repo_path');
+  if (memRepo) {
+    const escapedRepo = memRepo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parentDir = path.dirname(memRepo).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`(${escapedRepo}|${parentDir}[\\\\/]skills)`, 'i').test(trimmed)) return true;
+  }
 
   return false;
 }

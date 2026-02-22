@@ -207,13 +207,13 @@ decision = "allow"
 # Memory repo git operations — always allow
 [[rules]]
 toolName = "shell"
-argsPattern = "git\\s+-C\\s+.*agent-hub[\\\\/]memory\\s+(pull|fetch|status|log|diff)"
+argsPattern = "git\\s+-C\\s+.*[\\\\/]memory\\s+(pull|fetch|status|log|diff)"
 decision = "allow"
 
 # Memory file writes — always allow
 [[rules]]
 toolName = "write_file"
-argsPattern = "agent-hub[\\\\/]memory[\\\\/]"
+argsPattern = "[\\\\/]memory[\\\\/]"
 decision = "allow"
 
 # Destructive patterns — always deny

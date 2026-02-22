@@ -718,7 +718,7 @@ function SettingsPageInner() {
                   <Input
                     value={memoryRepoPath}
                     onChange={(e) => setMemoryRepoPath(e.target.value)}
-                    placeholder="e.g., C:\agent-hub\memory"
+                    placeholder="e.g., /home/user/memory or C:\Users\user\memory"
                     className="font-mono text-xs"
                   />
                   <p className="text-xs text-muted-foreground">
