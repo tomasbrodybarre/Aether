@@ -54,6 +54,18 @@ Then open [http://localhost:3000](http://localhost:3000).
 
 ---
 
+## Aether v1.1 Roadmap: Gemini Thought Persistence
+
+The current implementation has a bug where Gemini's thought processes are displayed as raw JSON and disappear after the stream ends. The next version will parse, display, and persist these thoughts correctly.
+
+- **New SSE Event Type**: A dedicated `'thought'` event will be emitted from the backend.
+- **Frontend Accumulation**: Thoughts will be collected in the UI and displayed in a collapsible "Reasoning" component during and after streaming.
+- **Data Persistence**: Thoughts will be saved as part of the message content in the database, ensuring they are available across sessions.
+
+This involves changes across the stack: updating TypeScript types, modifying the backend SSE mapping, enhancing the frontend SSE handler, and adapting the `StreamingMessage` and `MessageItem` components to render the `Reasoning` component.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |

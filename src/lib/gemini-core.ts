@@ -283,15 +283,15 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   ruleCount++;
 
   // ── 4. Native Gemini tools ──────────────────────────────────────────
-  //    write_todos — Google Tasks integration. Low risk (writes to
-  //    user's own task list), high friction if prompted every time.
-  pe.addRule({
-    toolName: 'write_todos',
-    decision: PolicyDecision.ALLOW,
-    priority: PRIORITY,
-    source: `${SOURCE} (native tools)`,
-  });
-  ruleCount++;
+  for (const toolName of ['write_todos', 'ask_user']) {
+    pe.addRule({
+      toolName,
+      decision: PolicyDecision.ALLOW,
+      priority: PRIORITY,
+      source: `${SOURCE} (native tools)`,
+    });
+    ruleCount++;
+  }
 
   // ── 5. save_memory — ASK_USER ──────────────────────────────────────
   //    Gemini's built-in memory tool writes to ~/.gemini/GEMINI.md which

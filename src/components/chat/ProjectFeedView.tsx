@@ -151,6 +151,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedVi
   const handlePermissionResponse = useCallback(
     async (decision: 'allow' | 'allow_session' | 'deny') => {
       if (!currentPermission) return;
+      console.log('[approval-debug] 🔵 User responded:', decision, 'for', currentPermission.permissionRequestId?.slice(0, 8));
 
       const body: {
         permissionRequestId: string;
@@ -268,10 +269,11 @@ export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedVi
         const decoder = new TextDecoder();
         let tokenUsage: TokenUsage | null = null;
         let buffer = '';
+        let shouldStopStream = false;
 
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done || shouldStopStream) break;
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
@@ -282,6 +284,11 @@ export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedVi
 
             try {
               const event: SSEEvent = JSON.parse(line.slice(6));
+
+              // Log non-text events for approval flow debugging
+              if (event.type !== 'text') {
+                console.log(`[approval-debug] SSE event: ${event.type}`, event.type === 'status' ? event.data?.slice(0, 100) : '');
+              }
 
               switch (event.type) {
                 case 'text': {
@@ -354,6 +361,30 @@ export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedVi
                     if (statusData.session_id) {
                       setStatusText(`Connected (${statusData.model || 'gemini'})`);
                       setTimeout(() => setStatusText(undefined), 2000);
+                    } else if (statusData.tool_status) {
+                      // Tool lifecycle status — show human-readable text
+                      const toolName = statusData.tool_name || 'tool';
+                      switch (statusData.tool_status) {
+                        case 'awaiting_approval':
+                          // Show feedback while waiting for the permission_request SSE to arrive
+                          console.log('[approval-debug] 🔶 Status: awaiting_approval for', toolName);
+                          setStatusText(`Awaiting approval: ${toolName}...`);
+                          break;
+                        case 'validating':
+                        case 'scheduled':
+                          setStatusText(`Preparing ${toolName}...`);
+                          break;
+                        case 'executing':
+                          setStatusText(`Running ${toolName}...`);
+                          break;
+                        case 'success':
+                        case 'error':
+                        case 'cancelled':
+                          setStatusText(undefined);
+                          break;
+                        default:
+                          setStatusText(undefined);
+                      }
                     } else if (statusData.notification) {
                       setStatusText(statusData.message || statusData.title || undefined);
                     } else {
@@ -381,11 +412,12 @@ export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedVi
                 case 'permission_request': {
                   try {
                     const permData: PermissionRequestEvent = JSON.parse(event.data);
+                    console.log('[approval-debug] 🟢 Frontend received permission_request:', permData.toolName, permData.permissionRequestId?.slice(0, 8));
                     setPermissionQueue((q) => [...q, permData]);
                     setPermissionResolved(null);
                     setPendingApprovalSessionId('project-feed');
-                  } catch {
-                    /* skip */
+                  } catch (parseErr) {
+                    console.error('[approval-debug] ❌ Failed to parse permission_request:', parseErr, 'raw:', event.data?.slice(0, 200));
                   }
                   break;
                 }
@@ -421,9 +453,16 @@ export function ProjectFeedView({ projectTag, initialTurns = [] }: ProjectFeedVi
                 }
 
                 case 'error': {
+                  // Append error inline so it's preserved with any prior content
                   accumulated += '\n\n**Error:** ' + event.data;
                   accumulatedRef.current = accumulated;
                   setStreamingContent(accumulated);
+                  // Don't continue the stream loop — break out so the
+                  // accumulated content (including the error) is saved as
+                  // a message and the finally block resets streaming state.
+                  // Without this, the UI stays stuck in streaming mode
+                  // waiting for a 'done' event that may never arrive.
+                  shouldStopStream = true;
                   break;
                 }
 
