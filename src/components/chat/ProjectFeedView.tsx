@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { createPatch } from 'diff';
 import type {
   Message,
   SSEEvent,
@@ -703,6 +704,124 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
     [messages, sendMessage]
   );
 
+  // --- Cell edit handlers ---
+
+  const handleCellDiscuss = useCallback(
+    async (turnId: string, cellIndex: number, newContent: string) => {
+      // Find the original content from the message
+      const assistantMsg = messages.find(
+        (m) => m.role === 'assistant' && m.id.startsWith(turnId)
+      );
+      if (!assistantMsg) return;
+
+      // Extract original segment content for the diff
+      const { parseResponseSegments, extractDisplayText } = await import('@/lib/parse-segments');
+      const displayText = extractDisplayText(assistantMsg.content);
+      const segments = parseResponseSegments(displayText);
+      const originalSegment = segments[cellIndex];
+      if (!originalSegment || originalSegment.type !== 'code') return;
+
+      const delta = createPatch(
+        `cell-${cellIndex}`,
+        originalSegment.content,
+        newContent,
+        'original',
+        'edited'
+      );
+
+      // Save to API
+      try {
+        const res = await fetch(`/api/turns/${turnId}/cell-edit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cellIndex, newContent, delta, action: 'discuss' }),
+        });
+        if (!res.ok) {
+          console.error('[cell-edit] Failed:', await res.text());
+          return;
+        }
+      } catch (err) {
+        console.error('[cell-edit] Error:', err);
+        return;
+      }
+
+      // Update local message with edited content
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id === assistantMsg.id) {
+            // Re-import to reconstruct — segments already computed above
+            const { replaceSegmentContent, updateResponseContent } = require('@/lib/parse-segments');
+            const updatedDisplay = replaceSegmentContent(segments, cellIndex, newContent);
+            const updatedContent = updateResponseContent(m.content, updatedDisplay);
+            return { ...m, content: updatedContent };
+          }
+          return m;
+        })
+      );
+
+      // Queue a discuss turn with the diff as the user message
+      const discussMessage = `I've edited a prose block in Out[${
+        messages.filter((m) => m.role === 'assistant').findIndex((m) => m.id === assistantMsg.id) + 1
+      }]. Here's what I changed:\n\n\`\`\`diff\n${delta}\`\`\`\n\nPlease review and let me know your thoughts.`;
+
+      sendMessage(discussMessage);
+    },
+    [messages, sendMessage]
+  );
+
+  const handleCellSave = useCallback(
+    async (turnId: string, cellIndex: number, newContent: string) => {
+      const assistantMsg = messages.find(
+        (m) => m.role === 'assistant' && m.id.startsWith(turnId)
+      );
+      if (!assistantMsg) return;
+
+      const { parseResponseSegments, extractDisplayText } = await import('@/lib/parse-segments');
+      const displayText = extractDisplayText(assistantMsg.content);
+      const segments = parseResponseSegments(displayText);
+      const originalSegment = segments[cellIndex];
+      if (!originalSegment || originalSegment.type !== 'code') return;
+
+      const delta = createPatch(
+        `cell-${cellIndex}`,
+        originalSegment.content,
+        newContent,
+        'original',
+        'edited'
+      );
+
+      // Save to API (silent — no conversational turn)
+      try {
+        const res = await fetch(`/api/turns/${turnId}/cell-edit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cellIndex, newContent, delta, action: 'save' }),
+        });
+        if (!res.ok) {
+          console.error('[cell-edit] Failed:', await res.text());
+          return;
+        }
+      } catch (err) {
+        console.error('[cell-edit] Error:', err);
+        return;
+      }
+
+      // Update local message with edited content
+      setMessages((prev) =>
+        prev.map((m) => {
+          if (m.id === assistantMsg.id) {
+            const { replaceSegmentContent, updateResponseContent } = require('@/lib/parse-segments');
+            const updatedDisplay = replaceSegmentContent(segments, cellIndex, newContent);
+            const updatedContent = updateResponseContent(m.content, updatedDisplay);
+            return { ...m, content: updatedContent };
+          }
+          return m;
+        })
+      );
+    },
+    [messages]
+  );
+
   // Auto-send queued message when streaming completes
   useEffect(() => {
     if (!isStreaming && queuedMessage) {
@@ -732,6 +851,8 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
         contentWidth={contentWidth}
         allProjectTags={allProjectTags}
         onTagChange={handleTurnTagChange}
+        onCellDiscuss={handleCellDiscuss}
+        onCellSave={handleCellSave}
       />
       <MessageInput
         onSend={sendMessage}

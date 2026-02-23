@@ -459,6 +459,20 @@ export interface TurnThought {
 }
 
 // ==========================================
+// Cell Edit Types (editable cells versioning)
+// ==========================================
+
+export interface CellEdit {
+  id: string;
+  turn_id: string;
+  cell_index: number;
+  version: number;
+  delta: string; // unified diff from previous version
+  action: 'discuss' | 'save';
+  created_at: string;
+}
+
+// ==========================================
 // Client Types
 // ==========================================
 

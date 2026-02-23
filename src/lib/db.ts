@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import crypto from 'crypto';
-import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, TurnToolCall, TurnThought } from '@/types';
+import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, TurnToolCall, TurnThought, CellEdit } from '@/types';
 
 const dataDir = process.env.CLAUDE_GUI_DATA_DIR || path.join(require('os').homedir(), '.codepilot');
 const DB_PATH = path.join(dataDir, 'codepilot.db');
@@ -155,6 +155,19 @@ function initDb(db: Database.Database): void {
       FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_turn_thoughts_turn ON turn_thoughts(turn_id);
+
+    -- Cell edits: delta-based versioning for editable cells
+    CREATE TABLE IF NOT EXISTS cell_edits (
+      id TEXT PRIMARY KEY,
+      turn_id TEXT NOT NULL,
+      cell_index INTEGER NOT NULL,
+      version INTEGER NOT NULL,
+      delta TEXT NOT NULL,
+      action TEXT NOT NULL CHECK(action IN ('discuss', 'save')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_cell_edits_turn ON cell_edits(turn_id, cell_index, version);
   `);
 
   // Run migrations for existing databases
@@ -302,6 +315,21 @@ function migrateDb(db: Database.Database): void {
       FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_turn_thoughts_turn ON turn_thoughts(turn_id);
+  `);
+
+  // Ensure cell_edits table exists for databases created before this migration
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cell_edits (
+      id TEXT PRIMARY KEY,
+      turn_id TEXT NOT NULL,
+      cell_index INTEGER NOT NULL,
+      version INTEGER NOT NULL,
+      delta TEXT NOT NULL,
+      action TEXT NOT NULL CHECK(action IN ('discuss', 'save')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_cell_edits_turn ON cell_edits(turn_id, cell_index, version);
   `);
 
   // Migrate existing settings to a default provider if api_providers is empty
@@ -721,6 +749,61 @@ export function getThoughtsByTurn(turnId: string): TurnThought[] {
   return db.prepare(
     'SELECT * FROM turn_thoughts WHERE turn_id = ? ORDER BY created_at ASC'
   ).all(turnId) as TurnThought[];
+}
+
+// ==========================================
+// Cell Edit Operations (delta-based versioning)
+// ==========================================
+
+export function insertCellEdit(
+  turnId: string,
+  cellIndex: number,
+  version: number,
+  delta: string,
+  action: 'discuss' | 'save',
+): CellEdit {
+  const db = getDb();
+  const id = crypto.randomBytes(16).toString('hex');
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+
+  db.prepare(
+    'INSERT INTO cell_edits (id, turn_id, cell_index, version, delta, action, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, turnId, cellIndex, version, delta, action, now);
+
+  return db.prepare('SELECT * FROM cell_edits WHERE id = ?').get(id) as CellEdit;
+}
+
+export function getCellEdits(turnId: string, cellIndex: number): CellEdit[] {
+  const db = getDb();
+  return db.prepare(
+    'SELECT * FROM cell_edits WHERE turn_id = ? AND cell_index = ? ORDER BY version ASC'
+  ).all(turnId, cellIndex) as CellEdit[];
+}
+
+export function getLatestCellVersion(turnId: string, cellIndex: number): number {
+  const db = getDb();
+  const row = db.prepare(
+    'SELECT MAX(version) as max_version FROM cell_edits WHERE turn_id = ? AND cell_index = ?'
+  ).get(turnId, cellIndex) as { max_version: number | null };
+  return row.max_version ?? 0;
+}
+
+/** Get recent save-type cell edits for preamble injection */
+export function getRecentSaveCellEdits(limit: number = 10, projectTag?: string | null): CellEdit[] {
+  const db = getDb();
+  if (projectTag !== undefined && projectTag !== null) {
+    return db.prepare(`
+      SELECT ce.* FROM cell_edits ce
+      JOIN turns t ON ce.turn_id = t.id
+      WHERE ce.action = 'save' AND t.project_tag = ?
+      ORDER BY ce.created_at DESC LIMIT ?
+    `).all(projectTag, limit) as CellEdit[];
+  }
+  return db.prepare(`
+    SELECT ce.* FROM cell_edits ce
+    WHERE ce.action = 'save'
+    ORDER BY ce.created_at DESC LIMIT ?
+  `).all(limit) as CellEdit[];
 }
 
 // ==========================================

@@ -41,6 +41,10 @@ interface MessageListProps {
   allProjectTags?: string[];
   /** Called when the user changes a turn's project tag */
   onTagChange?: (turnId: string, newTag: string | null) => void;
+  /** Called when user clicks Discuss on an edited cell */
+  onCellDiscuss?: (turnId: string, cellIndex: number, newContent: string) => void;
+  /** Called when user clicks Save on an edited cell */
+  onCellSave?: (turnId: string, cellIndex: number, newContent: string) => void;
 }
 
 export function MessageList({
@@ -59,6 +63,8 @@ export function MessageList({
   contentWidth = 100,
   allProjectTags,
   onTagChange,
+  onCellDiscuss,
+  onCellSave,
 }: MessageListProps) {
   if (messages.length === 0 && !isStreaming) {
     return (
@@ -84,7 +90,7 @@ export function MessageList({
             ? messages.slice(0, index + 1).filter(m => m.role === 'assistant').length
             : undefined;
           return (
-            <MessageItem key={message.id} message={message} blockNumber={blockNumber} allProjectTags={allProjectTags} onTagChange={onTagChange} />
+            <MessageItem key={message.id} message={message} blockNumber={blockNumber} allProjectTags={allProjectTags} onTagChange={onTagChange} onCellDiscuss={onCellDiscuss} onCellSave={onCellSave} />
           );
         })}
 

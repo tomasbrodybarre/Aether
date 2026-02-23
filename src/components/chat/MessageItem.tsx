@@ -5,8 +5,8 @@ import type { Message, TokenUsage, FileAttachment } from '@/types';
 import {
   Message as AIMessage,
   MessageContent,
-  MessageResponse,
 } from '@/components/ai-elements/message';
+import { SegmentedResponse } from '@/components/ai-elements/segmented-response';
 import { CopyIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon } from 'lucide-react';
 import { FileAttachmentDisplay } from './FileAttachmentDisplay';
 import { ProjectTagEditor } from './ProjectTagEditor';
@@ -18,6 +18,10 @@ interface MessageItemProps {
   allProjectTags?: string[];
   /** Called when the user changes a turn's project tag */
   onTagChange?: (turnId: string, newTag: string | null) => void;
+  /** Called when user clicks Discuss on an edited cell */
+  onCellDiscuss?: (turnId: string, cellIndex: number, newContent: string) => void;
+  /** Called when user clicks Save on an edited cell */
+  onCellSave?: (turnId: string, cellIndex: number, newContent: string) => void;
 }
 
 interface ToolBlock {
@@ -187,7 +191,7 @@ function extractTurnId(messageId: string): string | null {
 
 const COLLAPSE_HEIGHT = 300;
 
-export function MessageItem({ message, blockNumber, allProjectTags, onTagChange }: MessageItemProps) {
+export function MessageItem({ message, blockNumber, allProjectTags, onTagChange, onCellDiscuss, onCellSave }: MessageItemProps) {
   const isUser = message.role === 'user';
   const { text } = parseToolBlocks(message.content);
 
@@ -295,7 +299,12 @@ export function MessageItem({ message, blockNumber, allProjectTags, onTagChange 
               )}
             </div>
           ) : (
-            <MessageResponse>{displayText}</MessageResponse>
+            <SegmentedResponse
+              content={displayText}
+              turnId={turnId || message.id}
+              onDiscuss={onCellDiscuss}
+              onSave={onCellSave}
+            />
           )
         )}
 

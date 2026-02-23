@@ -40,7 +40,7 @@ import type {
   PermissionRequestEvent,
 } from '@/types';
 import { isImageFile } from '@/types';
-import { getSetting, updateSessionProjectTag, updateTurnProjectTag } from './db';
+import { getSetting, updateSessionProjectTag, updateTurnProjectTag, getRecentSaveCellEdits } from './db';
 import { processAetherInitDirectives } from './aether-init';
 
 // ---------------------------------------------------------------------------
@@ -1038,6 +1038,21 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
   // Recent conversation context
   if (recentTurns && recentTurns.length > 0) {
     lines.push('', formatTurnContext(recentTurns));
+  }
+
+  // Recent user edits (from Save actions on editable cells)
+  try {
+    const recentEdits = getRecentSaveCellEdits(5, currentProjectTag);
+    if (recentEdits.length > 0) {
+      lines.push('', '## Recent user edits');
+      lines.push('The user has finalized the following edits to assistant outputs. These reflect approved changes:');
+      for (const edit of recentEdits) {
+        const preview = edit.delta.length > 300 ? edit.delta.slice(0, 300) + '...' : edit.delta;
+        lines.push(`- Cell ${edit.cell_index} in turn ${edit.turn_id.slice(0, 8)}... (v${edit.version}): \`\`\`\n${preview}\n\`\`\``);
+      }
+    }
+  } catch {
+    // Non-critical — skip if DB not ready
   }
 
   // Append pre-read content at the end of the preamble
