@@ -10,6 +10,7 @@ import {
   MessageSquareIcon,
   CheckIcon,
   CopyIcon,
+  CloudIcon,
 } from 'lucide-react';
 
 interface EditableCellProps {
@@ -17,7 +18,7 @@ interface EditableCellProps {
   segmentIndex: number;
   turnId: string;
   onDiscuss: (segmentIndex: number, newContent: string) => void;
-  onSave: (segmentIndex: number, newContent: string) => void;
+  onSave: (segmentIndex: number, newContent: string) => Promise<{ gdocsPush?: boolean }> | void;
 }
 
 export function EditableCell({
@@ -30,6 +31,7 @@ export function EditableCell({
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(segment.content);
   const [copied, setCopied] = useState(false);
+  const [showCloud, setShowCloud] = useState(false);
   const { resolvedTheme } = useTheme();
   const editorContainerRef = useRef<HTMLDivElement>(null);
 
@@ -60,13 +62,17 @@ export function EditableCell({
     setIsEditing(false);
   }, [editContent, segment.content, segmentIndex, onDiscuss]);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (editContent === segment.content) {
       setIsEditing(false);
       return;
     }
-    onSave(segmentIndex, editContent);
+    const result = await onSave(segmentIndex, editContent);
     setIsEditing(false);
+    if (result?.gdocsPush) {
+      setShowCloud(true);
+      setTimeout(() => setShowCloud(false), 2500);
+    }
   }, [editContent, segment.content, segmentIndex, onSave]);
 
   const handleCopy = useCallback(async () => {
@@ -159,6 +165,12 @@ export function EditableCell({
           <span className="bg-zinc-700/50 rounded px-1.5 py-0.5">{langLabel}</span>
         </div>
         <div className="flex items-center gap-1">
+          {showCloud && (
+            <span className="flex items-center gap-1 px-1.5 py-0.5 text-blue-400 animate-pulse">
+              <CloudIcon className="h-3 w-3" />
+              <span className="text-xs">Synced</span>
+            </span>
+          )}
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); handleCopy(); }}

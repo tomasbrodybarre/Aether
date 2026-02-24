@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import crypto from 'crypto';
-import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, TurnToolCall, TurnThought, CellEdit } from '@/types';
+import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, TurnToolCall, TurnThought, CellEdit, ProjectDocMapping } from '@/types';
 
 const dataDir = process.env.CLAUDE_GUI_DATA_DIR || path.join(require('os').homedir(), '.codepilot');
 const DB_PATH = path.join(dataDir, 'codepilot.db');
@@ -168,6 +168,14 @@ function initDb(db: Database.Database): void {
       FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_cell_edits_turn ON cell_edits(turn_id, cell_index, version);
+
+    -- Project-to-Google-Doc mappings
+    CREATE TABLE IF NOT EXISTS project_doc_mappings (
+      project_tag TEXT PRIMARY KEY,
+      doc_id TEXT NOT NULL,
+      doc_title TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Run migrations for existing databases
@@ -330,6 +338,16 @@ function migrateDb(db: Database.Database): void {
       FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_cell_edits_turn ON cell_edits(turn_id, cell_index, version);
+  `);
+
+  // Ensure project_doc_mappings table exists
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS project_doc_mappings (
+      project_tag TEXT PRIMARY KEY,
+      doc_id TEXT NOT NULL,
+      doc_title TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   // Migrate existing settings to a default provider if api_providers is empty
@@ -804,6 +822,33 @@ export function getRecentSaveCellEdits(limit: number = 10, projectTag?: string |
     WHERE ce.action = 'save'
     ORDER BY ce.created_at DESC LIMIT ?
   `).all(limit) as CellEdit[];
+}
+
+// ==========================================
+// Project-Doc Mapping Operations (Google Docs integration)
+// ==========================================
+
+export function getProjectDocMapping(projectTag: string): ProjectDocMapping | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM project_doc_mappings WHERE project_tag = ?').get(projectTag) as ProjectDocMapping | undefined;
+}
+
+export function setProjectDocMapping(projectTag: string, docId: string, docTitle?: string): void {
+  const db = getDb();
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+  db.prepare(
+    'INSERT OR REPLACE INTO project_doc_mappings (project_tag, doc_id, doc_title, created_at) VALUES (?, ?, ?, ?)'
+  ).run(projectTag, docId, docTitle || null, now);
+}
+
+export function deleteProjectDocMapping(projectTag: string): void {
+  const db = getDb();
+  db.prepare('DELETE FROM project_doc_mappings WHERE project_tag = ?').run(projectTag);
+}
+
+export function getAllProjectDocMappings(): ProjectDocMapping[] {
+  const db = getDb();
+  return db.prepare('SELECT * FROM project_doc_mappings ORDER BY project_tag ASC').all() as ProjectDocMapping[];
 }
 
 // ==========================================

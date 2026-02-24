@@ -770,17 +770,17 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
   );
 
   const handleCellSave = useCallback(
-    async (turnId: string, cellIndex: number, newContent: string) => {
+    async (turnId: string, cellIndex: number, newContent: string): Promise<{ gdocsPush?: boolean }> => {
       const assistantMsg = messages.find(
         (m) => m.role === 'assistant' && m.id.startsWith(turnId)
       );
-      if (!assistantMsg) return;
+      if (!assistantMsg) return {};
 
       const { parseResponseSegments, extractDisplayText } = await import('@/lib/parse-segments');
       const displayText = extractDisplayText(assistantMsg.content);
       const segments = parseResponseSegments(displayText);
       const originalSegment = segments[cellIndex];
-      if (!originalSegment || originalSegment.type !== 'code') return;
+      if (!originalSegment || originalSegment.type !== 'code') return {};
 
       const delta = createPatch(
         `cell-${cellIndex}`,
@@ -790,7 +790,8 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
         'edited'
       );
 
-      // Save to API (silent — no conversational turn)
+      // Save to API
+      let gdocsPush = false;
       try {
         const res = await fetch(`/api/turns/${turnId}/cell-edit`, {
           method: 'POST',
@@ -799,11 +800,13 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
         });
         if (!res.ok) {
           console.error('[cell-edit] Failed:', await res.text());
-          return;
+          return {};
         }
+        const data = await res.json();
+        gdocsPush = !!data.gdocsPush;
       } catch (err) {
         console.error('[cell-edit] Error:', err);
-        return;
+        return {};
       }
 
       // Update local message with edited content
@@ -818,8 +821,14 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
           return m;
         })
       );
+
+      // Send a turn to the agent with the diff
+      const saveMessage = `I've edited and saved a prose block. Here is what I changed:\n\n\`\`\`diff\n${delta}\`\`\`\n\nPlease continue.`;
+      sendMessage(saveMessage);
+
+      return { gdocsPush };
     },
-    [messages]
+    [messages, sendMessage]
   );
 
   // Auto-send queued message when streaming completes

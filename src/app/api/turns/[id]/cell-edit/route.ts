@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTurn, insertCellEdit, getLatestCellVersion, getDb } from '@/lib/db';
+import { getTurn, insertCellEdit, getLatestCellVersion, getDb, getProjectDocMapping, getSetting } from '@/lib/db';
 import {
   parseResponseSegments,
   replaceSegmentContent,
   extractDisplayText,
   updateResponseContent,
 } from '@/lib/parse-segments';
+import { appendToDocument, isGoogleDocsConfigured } from '@/lib/google-docs';
 
 /**
  * POST /api/turns/[id]/cell-edit
@@ -68,9 +69,22 @@ export async function POST(
     const db = getDb();
     db.prepare('UPDATE turns SET response = ? WHERE id = ?').run(updatedResponse, turnId);
 
+    // Non-blocking Google Docs push on save
+    let gdocsPush = false;
+    if (action === 'save' && isGoogleDocsConfigured()) {
+      const mapping = turn.project_tag ? getProjectDocMapping(turn.project_tag) : null;
+      if (mapping && getSetting('gdocs_enabled') !== 'false') {
+        gdocsPush = true;
+        appendToDocument(mapping.doc_id, newContent).catch(err => {
+          console.warn('[cell-edit] Google Docs push failed:', err);
+        });
+      }
+    }
+
     return NextResponse.json({
       version: nextVersion,
       cellEditId: cellEdit.id,
+      gdocsPush,
     });
   } catch (error) {
     console.error('[cell-edit] Error:', error);

@@ -27,6 +27,9 @@ const ALLOWED_KEYS = [
   'memory_trigger_project_shift',
   'memory_consolidation_threshold',
   'memory_custom_rules',
+  // Google Docs integration
+  'gdocs_enabled',
+  'gdocs_token_path',
 ];
 
 export async function GET() {

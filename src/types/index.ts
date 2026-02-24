@@ -473,6 +473,17 @@ export interface CellEdit {
 }
 
 // ==========================================
+// Google Docs Integration Types
+// ==========================================
+
+export interface ProjectDocMapping {
+  project_tag: string;
+  doc_id: string;
+  doc_title: string | null;
+  created_at: string;
+}
+
+// ==========================================
 // Client Types
 // ==========================================
 

@@ -123,6 +123,19 @@ function SettingsPageInner() {
   const [memorySaving, setMemorySaving] = useState(false);
   const [memorySaved, setMemorySaved] = useState(false);
 
+  // Google Docs state
+  const [gdocsEnabled, setGdocsEnabled] = useState(false);
+  const [gdocsTokenPath, setGdocsTokenPath] = useState('');
+  const [gdocsConnected, setGdocsConnected] = useState(false);
+  const [gdocsChecking, setGdocsChecking] = useState(false);
+  const [gdocsMappings, setGdocsMappings] = useState<Array<{ project_tag: string; doc_id: string; doc_title: string | null; created_at: string }>>([]);
+  const [gdocsNewTag, setGdocsNewTag] = useState('');
+  const [gdocsNewDocId, setGdocsNewDocId] = useState('');
+  const [gdocsVerifying, setGdocsVerifying] = useState<string | null>(null);
+  const [gdocsCreating, setGdocsCreating] = useState(false);
+  const [gdocsSaving, setGdocsSaving] = useState(false);
+  const [gdocsSaved, setGdocsSaved] = useState(false);
+
   const fetchSettings = useCallback(async () => {
     try {
       const res = await fetch("/api/settings");
@@ -176,6 +189,11 @@ function SettingsPageInner() {
           setMemoryConsolidationThreshold(parseInt(appSettings.memory_consolidation_threshold, 10) || 15);
         }
         if (appSettings.memory_custom_rules) setMemoryCustomRules(appSettings.memory_custom_rules);
+        // Google Docs settings
+        if (appSettings.gdocs_enabled !== undefined) {
+          setGdocsEnabled(appSettings.gdocs_enabled === 'true');
+        }
+        if (appSettings.gdocs_token_path) setGdocsTokenPath(appSettings.gdocs_token_path);
         setMemoryTriggers({
           explicit_rules: appSettings.memory_trigger_explicit_rules !== 'false',
           corrections: appSettings.memory_trigger_corrections !== 'false',
@@ -207,11 +225,26 @@ function SettingsPageInner() {
     }
   }, []);
 
+  // Fetch Google Docs connection status and mappings
+  const fetchGdocs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/gdocs');
+      if (res.ok) {
+        const data = await res.json();
+        setGdocsConnected(data.connected);
+        setGdocsMappings(data.mappings || []);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   useEffect(() => {
     fetchSettings();
     fetchAppSettings();
     fetchModels();
-  }, [fetchSettings, fetchAppSettings, fetchModels]);
+    fetchGdocs();
+  }, [fetchSettings, fetchAppSettings, fetchModels, fetchGdocs]);
 
   const hasChanges =
     JSON.stringify(settings) !== JSON.stringify(originalSettings);
@@ -440,6 +473,131 @@ function SettingsPageInner() {
     } finally {
       setMemorySaving(false);
     }
+  };
+
+  const saveGdocsSettings = async () => {
+    setGdocsSaving(true);
+    try {
+      const res = await fetch("/api/settings/app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settings: {
+            gdocs_enabled: gdocsEnabled ? 'true' : 'false',
+            gdocs_token_path: gdocsTokenPath,
+          },
+        }),
+      });
+      if (res.ok) {
+        setGdocsSaved(true);
+        setTimeout(() => setGdocsSaved(false), 2000);
+        // Re-check connection after saving
+        fetchGdocs();
+      }
+    } catch {
+      // ignore
+    } finally {
+      setGdocsSaving(false);
+    }
+  };
+
+  const testGdocsConnection = async () => {
+    setGdocsChecking(true);
+    try {
+      // Save settings first so the backend picks up the token path
+      await fetch("/api/settings/app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settings: {
+            gdocs_enabled: 'true',
+            gdocs_token_path: gdocsTokenPath,
+          },
+        }),
+      });
+      const res = await fetch('/api/gdocs');
+      if (res.ok) {
+        const data = await res.json();
+        setGdocsConnected(data.connected);
+        setGdocsEnabled(true);
+      }
+    } catch {
+      setGdocsConnected(false);
+    } finally {
+      setGdocsChecking(false);
+    }
+  };
+
+  const verifyGdocsDoc = async (docId: string, projectTag: string) => {
+    setGdocsVerifying(projectTag);
+    try {
+      const res = await fetch('/api/gdocs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify', doc_id: docId }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Update the mapping with verified title
+        setGdocsMappings(prev => prev.map(m =>
+          m.project_tag === projectTag ? { ...m, doc_title: data.title } : m
+        ));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setGdocsVerifying(null);
+    }
+  };
+
+  const addGdocsMapping = async (projectTag: string, docId: string) => {
+    try {
+      const res = await fetch('/api/gdocs', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_tag: projectTag, doc_id: docId }),
+      });
+      if (res.ok) {
+        fetchGdocs();
+        setGdocsNewTag('');
+        setGdocsNewDocId('');
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const deleteGdocsMapping = async (projectTag: string) => {
+    try {
+      const res = await fetch(`/api/gdocs?project_tag=${encodeURIComponent(projectTag)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setGdocsMappings(prev => prev.filter(m => m.project_tag !== projectTag));
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const createGdocsDoc = async (title: string) => {
+    setGdocsCreating(true);
+    try {
+      const res = await fetch('/api/gdocs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create', title }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { id: data.id, title: data.title };
+      }
+    } catch {
+      // ignore
+    } finally {
+      setGdocsCreating(false);
+    }
+    return null;
   };
 
   return (
@@ -828,6 +986,163 @@ function SettingsPageInner() {
                     {memorySaving ? "Saving..." : "Save Memory Settings"}
                   </Button>
                   {memorySaved && (
+                    <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Google Docs Integration */}
+          <div className="rounded-lg border border-border/50 p-4 transition-shadow hover:shadow-sm">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-sm font-medium">Google Docs</h2>
+              <Switch
+                checked={gdocsEnabled}
+                onCheckedChange={setGdocsEnabled}
+              />
+            </div>
+            <p className="mb-4 text-xs text-muted-foreground">
+              Push prose cell content to Google Docs on save. Each project maps to one document.
+            </p>
+
+            {gdocsEnabled && (
+              <div className="space-y-4">
+                {/* Token path */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Token File Path</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={gdocsTokenPath}
+                      onChange={(e) => setGdocsTokenPath(e.target.value)}
+                      placeholder="C:/agent-hub/config/token.json"
+                      className="flex-1 font-mono text-xs"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={testGdocsConnection}
+                      disabled={gdocsChecking}
+                    >
+                      {gdocsChecking ? "Testing..." : "Test Connection"}
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`h-2 w-2 rounded-full ${gdocsConnected ? 'bg-green-500' : 'bg-zinc-500'}`} />
+                    <span className="text-xs text-muted-foreground">
+                      {gdocsConnected ? 'Connected' : 'Not connected'}
+                    </span>
+                  </div>
+                </div>
+
+                <hr className="border-border/30" />
+
+                {/* Project-doc mappings */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Project Mappings</h3>
+                  <p className="text-xs text-muted-foreground">
+                    Map each project to a Google Doc. Prose cells saved in that project will push content to the linked doc.
+                  </p>
+
+                  {gdocsMappings.length > 0 && (
+                    <div className="space-y-2">
+                      {gdocsMappings.map((mapping) => (
+                        <div key={mapping.project_tag} className="flex items-center gap-2 rounded-md border border-border/30 px-3 py-2">
+                          <span className="text-xs font-medium min-w-[100px]">{mapping.project_tag}</span>
+                          <Input
+                            value={mapping.doc_id}
+                            readOnly
+                            className="flex-1 font-mono text-xs bg-muted/30"
+                          />
+                          {mapping.doc_title && (
+                            <span className="text-xs text-muted-foreground truncate max-w-[150px]" title={mapping.doc_title}>
+                              {mapping.doc_title}
+                            </span>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => verifyGdocsDoc(mapping.doc_id, mapping.project_tag)}
+                            disabled={gdocsVerifying === mapping.project_tag}
+                            className="text-xs"
+                          >
+                            {gdocsVerifying === mapping.project_tag ? '...' : 'Verify'}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deleteGdocsMapping(mapping.project_tag)}
+                            className="text-xs text-muted-foreground hover:text-red-500"
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add new mapping */}
+                  <div className="flex items-end gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Project Tag</Label>
+                      <Input
+                        value={gdocsNewTag}
+                        onChange={(e) => setGdocsNewTag(e.target.value)}
+                        placeholder="my-project"
+                        className="font-mono text-xs w-[140px]"
+                      />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <Label className="text-xs">Google Doc ID</Label>
+                      <Input
+                        value={gdocsNewDocId}
+                        onChange={(e) => setGdocsNewDocId(e.target.value)}
+                        placeholder="Paste doc ID or URL"
+                        className="font-mono text-xs"
+                      />
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        if (gdocsNewTag && gdocsNewDocId) {
+                          // Extract doc ID from URL if full URL pasted
+                          let docId = gdocsNewDocId;
+                          const urlMatch = gdocsNewDocId.match(/\/d\/([a-zA-Z0-9_-]+)/);
+                          if (urlMatch) docId = urlMatch[1];
+                          addGdocsMapping(gdocsNewTag, docId);
+                        }
+                      }}
+                      disabled={!gdocsNewTag || !gdocsNewDocId}
+                    >
+                      Add
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        if (!gdocsNewTag) return;
+                        const result = await createGdocsDoc(`Aether — ${gdocsNewTag}`);
+                        if (result) {
+                          await addGdocsMapping(gdocsNewTag, result.id);
+                        }
+                      }}
+                      disabled={!gdocsNewTag || gdocsCreating}
+                    >
+                      {gdocsCreating ? 'Creating...' : 'Create New'}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Save button */}
+                <div className="flex items-center gap-3 pt-1">
+                  <Button
+                    size="sm"
+                    onClick={saveGdocsSettings}
+                    disabled={gdocsSaving}
+                  >
+                    {gdocsSaving ? "Saving..." : "Save Google Docs Settings"}
+                  </Button>
+                  {gdocsSaved && (
                     <span className="text-xs text-green-600 dark:text-green-400">Saved</span>
                   )}
                 </div>

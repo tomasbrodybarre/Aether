@@ -13,7 +13,7 @@ interface SegmentedResponseProps {
   content: string;
   turnId: string;
   onDiscuss?: (turnId: string, cellIndex: number, newContent: string) => void;
-  onSave?: (turnId: string, cellIndex: number, newContent: string) => void;
+  onSave?: (turnId: string, cellIndex: number, newContent: string) => Promise<{ gdocsPush?: boolean }> | void;
 }
 
 /**
@@ -47,7 +47,7 @@ export function SegmentedResponse({
 
   const handleSave = useCallback(
     (segmentIndex: number, newContent: string) => {
-      onSave?.(turnId, segmentIndex, newContent);
+      return onSave?.(turnId, segmentIndex, newContent);
     },
     [turnId, onSave]
   );
