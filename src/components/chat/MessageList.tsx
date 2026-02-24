@@ -44,7 +44,7 @@ interface MessageListProps {
   /** Called when user clicks Discuss on an edited cell */
   onCellDiscuss?: (turnId: string, cellIndex: number, newContent: string) => void;
   /** Called when user clicks Save on an edited cell */
-  onCellSave?: (turnId: string, cellIndex: number, newContent: string) => Promise<{ gdocsPush?: boolean }> | void;
+  onCellSave?: (turnId: string, cellIndex: number, newContent: string) => Promise<{ gdocsPush?: boolean; fileWritten?: boolean }> | void;
 }
 
 export function MessageList({

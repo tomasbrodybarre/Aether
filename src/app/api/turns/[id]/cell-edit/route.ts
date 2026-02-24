@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import * as fs from 'fs';
+import * as path from 'path';
 import { getTurn, insertCellEdit, getLatestCellVersion, getDb, getProjectDocMapping, getSetting } from '@/lib/db';
 import {
   parseResponseSegments,
   replaceSegmentContent,
   extractDisplayText,
   updateResponseContent,
+  type CodeSegment,
 } from '@/lib/parse-segments';
 import { appendToDocument, isGoogleDocsConfigured } from '@/lib/google-docs';
 
@@ -69,6 +72,25 @@ export async function POST(
     const db = getDb();
     db.prepare('UPDATE turns SET response = ? WHERE id = ?').run(updatedResponse, turnId);
 
+    // File write for code cells with filePath
+    let fileWritten = false;
+    if (action === 'save' && segments[cellIndex].type === 'code') {
+      const seg = segments[cellIndex] as CodeSegment;
+      if (seg.filePath && turn.working_directory) {
+        const resolved = path.resolve(turn.working_directory, seg.filePath);
+        const workDir = path.resolve(turn.working_directory);
+        if (!resolved.startsWith(workDir + path.sep) && resolved !== workDir) {
+          return NextResponse.json({ error: 'Path traversal rejected' }, { status: 403 });
+        }
+        const dir = path.dirname(resolved);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(resolved, newContent, 'utf-8');
+        fileWritten = true;
+      }
+    }
+
     // Non-blocking Google Docs push on save
     let gdocsPush = false;
     if (action === 'save' && isGoogleDocsConfigured()) {
@@ -85,6 +107,7 @@ export async function POST(
       version: nextVersion,
       cellEditId: cellEdit.id,
       gdocsPush,
+      fileWritten,
     });
   } catch (error) {
     console.error('[cell-edit] Error:', error);

@@ -904,6 +904,7 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
     '- **Rich text rendering**: Markdown, LaTeX ($...$ and $$...$$), syntax-highlighted code, and GFM tables all render natively in the chat. IMPORTANT: Single `$` is treated as a LaTeX delimiter. When writing currency amounts, always escape the dollar sign with a backslash (`\\$68,880` not `$68,880`) to prevent it from being parsed as math.',
     '- **Message queueing**: The user can queue a follow-up message while you are still streaming. They can also interrupt you (Escape or red Interrupt button) to force-send a message immediately.',
     '- **Labeled outputs**: Assistant messages are labeled Out[N] for easy reference.',
+    '- **Editable code cells**: When your response includes a fenced code block with a file path after the language tag (e.g. \\`\\`\\`python src/lib/foo.py), the user can edit the code in-place and Save to write it directly to disk. Always include the file path on the fence line when showing code that belongs to a specific file. Inline examples and snippets that don\'t map to a file should NOT include a path.',
     '',
     '## How to render images inline:',
     'Embed images directly in your response text using markdown image syntax. This lets you place images exactly where they make sense in your narrative.',

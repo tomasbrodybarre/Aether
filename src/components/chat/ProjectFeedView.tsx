@@ -770,7 +770,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
   );
 
   const handleCellSave = useCallback(
-    async (turnId: string, cellIndex: number, newContent: string): Promise<{ gdocsPush?: boolean }> => {
+    async (turnId: string, cellIndex: number, newContent: string): Promise<{ gdocsPush?: boolean; fileWritten?: boolean }> => {
       const assistantMsg = messages.find(
         (m) => m.role === 'assistant' && m.id.startsWith(turnId)
       );
@@ -792,6 +792,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
 
       // Save to API
       let gdocsPush = false;
+      let fileWritten = false;
       try {
         const res = await fetch(`/api/turns/${turnId}/cell-edit`, {
           method: 'POST',
@@ -804,6 +805,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
         }
         const data = await res.json();
         gdocsPush = !!data.gdocsPush;
+        fileWritten = !!data.fileWritten;
       } catch (err) {
         console.error('[cell-edit] Error:', err);
         return {};
@@ -823,10 +825,14 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
       );
 
       // Send a turn to the agent with the diff
-      const saveMessage = `I've edited and saved a prose block. Here is what I changed:\n\n\`\`\`diff\n${delta}\`\`\`\n\nPlease continue.`;
+      const blockType = fileWritten ? 'a code block' : 'a prose block';
+      const fileNote = fileWritten && originalSegment.type === 'code' && 'filePath' in originalSegment
+        ? ` (written to \`${(originalSegment as { filePath?: string }).filePath}\`)`
+        : '';
+      const saveMessage = `I've edited and saved ${blockType}${fileNote}. Here is what I changed:\n\n\`\`\`diff\n${delta}\`\`\`\n\nPlease continue.`;
       sendMessage(saveMessage);
 
-      return { gdocsPush };
+      return { gdocsPush, fileWritten };
     },
     [messages, sendMessage]
   );

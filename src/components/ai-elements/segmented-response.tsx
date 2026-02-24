@@ -13,7 +13,7 @@ interface SegmentedResponseProps {
   content: string;
   turnId: string;
   onDiscuss?: (turnId: string, cellIndex: number, newContent: string) => void;
-  onSave?: (turnId: string, cellIndex: number, newContent: string) => Promise<{ gdocsPush?: boolean }> | void;
+  onSave?: (turnId: string, cellIndex: number, newContent: string) => Promise<{ gdocsPush?: boolean; fileWritten?: boolean }> | void;
 }
 
 /**

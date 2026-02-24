@@ -18,6 +18,8 @@ export interface CodeSegment {
   content: string;
   /** Language tag from the opening fence (e.g. 'python', 'text', 'prose') */
   language: string;
+  /** File path from the opening fence (e.g. 'src/lib/foo.py'), if present */
+  filePath?: string;
   /** The fence character used ('`' or '~') */
   fenceChar: string;
   /** Number of fence characters (3+) */
@@ -34,7 +36,9 @@ const EDITABLE_PROSE_LANGUAGES = new Set(['text', 'prose', 'markdown', 'md']);
  * Phase 1: only prose languages. Phase 2 will add all code languages.
  */
 export function isEditableCell(segment: ResponseSegment): boolean {
-  return segment.type === 'code' && EDITABLE_PROSE_LANGUAGES.has(segment.language.toLowerCase());
+  if (segment.type !== 'code') return false;
+  return EDITABLE_PROSE_LANGUAGES.has(segment.language.toLowerCase())
+    || !!segment.filePath;
 }
 
 /**
@@ -56,13 +60,14 @@ export function parseResponseSegments(markdown: string): ResponseSegment[] {
   let fenceChar = '';
   let fenceCount = 0;
   let language = '';
+  let filePath = '';
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
     if (!inCode) {
       // Check for opening fence
-      const openMatch = line.match(/^(`{3,}|~{3,})\s*([\w.-]*)\s*$/);
+      const openMatch = line.match(/^(`{3,}|~{3,})\s*([\w.-]*)\s*(.*?)\s*$/);
       if (openMatch) {
         // Flush accumulated text
         if (textLines.length > 0) {
@@ -73,6 +78,7 @@ export function parseResponseSegments(markdown: string): ResponseSegment[] {
         fenceChar = openMatch[1][0];
         fenceCount = openMatch[1].length;
         language = openMatch[2] || '';
+        filePath = openMatch[3]?.trim() || '';
         codeLines = [];
       } else {
         textLines.push(line);
@@ -89,6 +95,7 @@ export function parseResponseSegments(markdown: string): ResponseSegment[] {
           type: 'code',
           content: codeLines.join('\n'),
           language,
+          filePath: filePath || undefined,
           fenceChar,
           fenceCount,
         });
@@ -96,6 +103,7 @@ export function parseResponseSegments(markdown: string): ResponseSegment[] {
         fenceChar = '';
         fenceCount = 0;
         language = '';
+        filePath = '';
         codeLines = [];
       } else {
         codeLines.push(line);
@@ -105,7 +113,7 @@ export function parseResponseSegments(markdown: string): ResponseSegment[] {
 
   // Handle unterminated code block — treat opening fence + content as text
   if (inCode) {
-    const openingFence = fenceChar.repeat(fenceCount) + (language ? language : '');
+    const openingFence = fenceChar.repeat(fenceCount) + (language ? language : '') + (filePath ? ' ' + filePath : '');
     textLines.push(openingFence, ...codeLines);
   }
 
@@ -125,7 +133,9 @@ export function reconstructMarkdown(segments: ResponseSegment[]): string {
   return segments.map((seg) => {
     if (seg.type === 'text') return seg.content;
     const fence = seg.fenceChar.repeat(seg.fenceCount);
-    const openingLine = seg.language ? `${fence}${seg.language}` : fence;
+    const openingLine = seg.language
+      ? (seg.filePath ? `${fence}${seg.language} ${seg.filePath}` : `${fence}${seg.language}`)
+      : fence;
     return `${openingLine}\n${seg.content}\n${fence}`;
   }).join('\n');
 }
