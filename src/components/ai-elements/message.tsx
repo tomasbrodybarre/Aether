@@ -331,17 +331,28 @@ function MarkdownImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
   const { src, alt, ...rest } = props;
   const [error, setError] = useState<string | null>(null);
 
+  // Cache-bust /api/files/raw URLs so overwritten files (same name) show the new version.
+  // The timestamp is captured once on mount via useState initializer — stable across re-renders.
+  const [bustSrc] = useState(() => {
+    if (!src) return src;
+    if (typeof src === 'string' && src.includes('/api/files/raw')) {
+      const sep = src.includes('?') ? '&' : '?';
+      return `${src}${sep}_t=${Date.now()}`;
+    }
+    return src;
+  });
+
   const handleError = useCallback(async () => {
-    if (!src) { setError('No image source provided'); return; }
+    if (!bustSrc) { setError('No image source provided'); return; }
     try {
-      const res = await fetch(src as string, { method: 'HEAD' });
+      const res = await fetch(bustSrc as string, { method: 'HEAD' });
       if (res.status === 403) setError('Access denied — file outside allowed directories');
       else if (res.status === 404) setError('File not found on disk');
       else setError(`Failed to load image (HTTP ${res.status})`);
     } catch {
       setError('Failed to load image');
     }
-  }, [src]);
+  }, [bustSrc]);
 
   if (error) {
     return (
@@ -360,7 +371,7 @@ function MarkdownImage(props: React.ImgHTMLAttributes<HTMLImageElement>) {
       <span className="block rounded-lg overflow-hidden border border-border/30 bg-muted/20">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={src}
+          src={bustSrc}
           alt={alt || ''}
           className="w-full object-contain"
           onError={handleError}

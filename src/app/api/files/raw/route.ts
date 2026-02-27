@@ -136,10 +136,22 @@ export async function GET(request: NextRequest) {
   const ext = path.extname(resolved).toLowerCase();
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 
+  // ETag based on mtime + size — forces revalidation when the file changes on disk
+  // (e.g. Gemini regenerates plot.png with the same name)
+  const etag = `"${stat.mtimeMs.toString(36)}-${stat.size.toString(36)}"`;
+
+  // If the browser already has this version, return 304
+  const ifNoneMatch = request.headers.get('if-none-match');
+  if (ifNoneMatch === etag) {
+    return new Response(null, { status: 304, headers: { ETag: etag } });
+  }
+
   return new Response(buffer, {
     headers: {
       'Content-Type': contentType,
       'Content-Disposition': `inline; filename="${path.basename(resolved)}"`,
+      'Cache-Control': 'no-cache',
+      'ETag': etag,
     },
   });
 }
