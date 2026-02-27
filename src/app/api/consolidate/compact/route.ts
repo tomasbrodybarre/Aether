@@ -15,8 +15,18 @@ Rules:
 5. After processing, the ## Staging section must be empty (just the heading with no bullets).
 6. Do NOT add new top-level sections. Only add content to existing sections.
 7. Do NOT remove or rewrite existing structured content — only add the new observations to it.
-8. Return the COMPLETE updated file content. Do not omit any sections.
-9. Do not wrap the output in markdown code fences. Return the raw file content.`;
+8. Return the COMPLETE updated file content. Do not omit any sections.`;
+
+const RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    content: {
+      type: 'string',
+      description: 'The complete updated file content with staging observations consolidated into structured sections.',
+    },
+  },
+  required: ['content'],
+};
 
 /**
  * POST /api/consolidate/compact
@@ -63,20 +73,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ noChanges: true, stagingCount: 0 });
     }
 
-    // Call LLM
+    // Call LLM with structured JSON output
     const baseLlm = await getBaseLlmClient();
-    const response = await baseLlm.generateContent({
+    const result = await baseLlm.generateJson({
       modelConfigKey: { model: 'gemini-2.5-flash' },
       contents: [{
         role: 'user',
         parts: [{ text: `Here is the project memory file to consolidate:\n\n${original}` }],
       }],
+      schema: RESPONSE_SCHEMA,
       systemInstruction: SYSTEM_INSTRUCTION,
       abortSignal: AbortSignal.timeout(60_000),
       promptId: `compact-${randomUUID()}`,
     });
 
-    const proposed = response.text;
+    const proposed = (result as { content: string }).content;
     if (!proposed) {
       return NextResponse.json({ error: 'LLM returned empty response' }, { status: 500 });
     }

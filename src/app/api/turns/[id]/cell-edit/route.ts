@@ -10,6 +10,7 @@ import {
   type CodeSegment,
 } from '@/lib/parse-segments';
 import { appendToDocument, isGoogleDocsConfigured } from '@/lib/google-docs';
+import { analyzeCellEditChain } from '@/lib/edit-memory';
 
 /**
  * POST /api/turns/[id]/cell-edit
@@ -91,9 +92,11 @@ export async function POST(
       }
     }
 
-    // Non-blocking Google Docs push on save
+    // Non-blocking Google Docs push on save (prose cells only — skip code cells)
     let gdocsPush = false;
-    if (action === 'save' && isGoogleDocsConfigured()) {
+    const PROSE_LANGUAGES = new Set(['text', 'prose', 'markdown', 'md']);
+    const cellLanguage = (segments[cellIndex] as CodeSegment).language?.toLowerCase() || '';
+    if (action === 'save' && PROSE_LANGUAGES.has(cellLanguage) && isGoogleDocsConfigured()) {
       const mapping = turn.project_tag ? getProjectDocMapping(turn.project_tag) : null;
       if (mapping && getSetting('gdocs_enabled') !== 'false') {
         gdocsPush = true;
@@ -103,11 +106,22 @@ export async function POST(
       }
     }
 
+    // Memory analysis on save: analyze the full edit chain for learnable patterns
+    let memoryObservation: { learned: boolean; observation?: string } = { learned: false };
+    if (action === 'save') {
+      try {
+        memoryObservation = await analyzeCellEditChain(turnId, cellIndex, turn);
+      } catch (err) {
+        console.warn('[cell-edit] Memory analysis failed:', err);
+      }
+    }
+
     return NextResponse.json({
       version: nextVersion,
       cellEditId: cellEdit.id,
       gdocsPush,
       fileWritten,
+      memoryObservation,
     });
   } catch (error) {
     console.error('[cell-edit] Error:', error);

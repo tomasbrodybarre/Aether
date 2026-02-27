@@ -63,13 +63,14 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
   const [statusText, setStatusText] = useState<string | undefined>();
   const [mode, setMode] = useState('code');
   const [currentModel, setCurrentModel] = useState('');
+  const [thinkingLevel, setThinkingLevel] = useState<'low' | 'default' | 'high'>('default');
   const [permissionQueue, setPermissionQueue] = useState<PermissionRequestEvent[]>([]);
   const [permissionResolved, setPermissionResolved] = useState<'allow' | 'deny' | null>(null);
   const currentPermission = permissionQueue[0] ?? null;
   const [streamingToolOutput, setStreamingToolOutput] = useState('');
   const [workingDir, setWorkingDir] = useState('');
   const [allProjectTags, setAllProjectTags] = useState<string[]>([]);
-  const [queuedMessage, setQueuedMessage] = useState<{ content: string; files?: FileAttachment[] } | null>(null);
+  const [queuedMessage, setQueuedMessage] = useState<{ content: string; files?: FileAttachment[]; opts?: { isSystem?: boolean; cellEditId?: string } } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const interruptRef = useRef(false);
 
@@ -248,9 +249,9 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
   );
 
   const sendMessage = useCallback(
-    async (content: string, files?: FileAttachment[]) => {
+    async (content: string, files?: FileAttachment[], opts?: { isSystem?: boolean; cellEditId?: string }) => {
       if (isStreaming) {
-        setQueuedMessage({ content, files });
+        setQueuedMessage({ content, files, opts });
         return;
       }
 
@@ -267,17 +268,19 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
         displayContent = `<!--files:${JSON.stringify(fileMeta)}-->${content}`;
       }
 
-      // Optimistic: add user message immediately
-      const tempUserId = 'temp-' + Date.now();
-      const userMessage: Message = {
-        id: tempUserId,
-        session_id: '',
-        role: 'user',
-        content: displayContent,
-        created_at: new Date().toISOString(),
-        token_usage: null,
-      };
-      setMessages((prev) => [...prev, userMessage]);
+      // Optimistic: add user message immediately (skip for system turns — hidden in UI)
+      if (!opts?.isSystem) {
+        const tempUserId = 'temp-' + Date.now();
+        const userMessage: Message = {
+          id: tempUserId,
+          session_id: '',
+          role: 'user',
+          content: displayContent,
+          created_at: new Date().toISOString(),
+          token_usage: null,
+        };
+        setMessages((prev) => [...prev, userMessage]);
+      }
       setIsStreaming(true);
       setStreamingContent('');
       accumulatedRef.current = '';
@@ -290,6 +293,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
 
       let accumulated = '';
       let currentTurnId = '';
+      let isSystemTurn = !!opts?.isSystem;
       const toolUsesAccum: ToolUseInfo[] = [];
       const toolResultsAccum: ToolResultInfo[] = [];
 
@@ -304,7 +308,10 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
             model: currentModel || undefined,
             project_tag: projectTag,
             working_directory: workingDir || undefined,
+            ...(thinkingLevel !== 'default' ? { thinking_level: thinkingLevel } : {}),
             ...(files && files.length > 0 ? { files } : {}),
+            ...(opts?.isSystem ? { is_system: true } : {}),
+            ...(opts?.cellEditId ? { cell_edit_id: opts.cellEditId } : {}),
           }),
           signal: controller.signal,
         });
@@ -525,6 +532,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
                   try {
                     const turnData = JSON.parse(event.data);
                     if (turnData.turn_id) currentTurnId = turnData.turn_id;
+                    if (turnData.is_system) isSystemTurn = true;
                   } catch { /* skip */ }
                   window.dispatchEvent(new CustomEvent('turn-created', {
                     detail: { turnId: currentTurnId },
@@ -581,6 +589,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
             content: buildContent(),
             created_at: new Date().toISOString(),
             token_usage: tokenUsage ? JSON.stringify(tokenUsage) : null,
+            is_system: isSystemTurn,
           };
           setMessages((prev) => [...prev, assistantMessage]);
         }
@@ -639,6 +648,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
       currentModel,
       projectTag,
       workingDir,
+      thinkingLevel,
       setPendingApprovalSessionId,
       flushStreamingContent,
       addToast,
@@ -730,6 +740,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
       );
 
       // Save to API
+      let cellEditId: string | undefined;
       try {
         const res = await fetch(`/api/turns/${turnId}/cell-edit`, {
           method: 'POST',
@@ -740,6 +751,8 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
           console.error('[cell-edit] Failed:', await res.text());
           return;
         }
+        const data = await res.json();
+        cellEditId = data.cellEditId;
       } catch (err) {
         console.error('[cell-edit] Error:', err);
         return;
@@ -759,12 +772,12 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
         })
       );
 
-      // Queue a discuss turn with the diff as the user message
+      // Queue a discuss turn with the diff as the user message (hidden system turn)
       const discussMessage = `I've edited a prose block in Out[${
         messages.filter((m) => m.role === 'assistant').findIndex((m) => m.id === assistantMsg.id) + 1
       }]. Here's what I changed:\n\n\`\`\`diff\n${delta}\`\`\`\n\nPlease review and let me know your thoughts.`;
 
-      sendMessage(discussMessage);
+      sendMessage(discussMessage, undefined, { isSystem: true, cellEditId });
     },
     [messages, sendMessage]
   );
@@ -790,7 +803,7 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
         'edited'
       );
 
-      // Save to API
+      // Save to API (includes async memory analysis)
       let gdocsPush = false;
       let fileWritten = false;
       try {
@@ -806,6 +819,25 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
         const data = await res.json();
         gdocsPush = !!data.gdocsPush;
         fileWritten = !!data.fileWritten;
+
+        // Show toast if memory observation was learned
+        if (data.memoryObservation?.learned && data.memoryObservation?.observation) {
+          addToast({
+            type: 'memory',
+            message: `Learned from edit: ${data.memoryObservation.observation}`,
+            detail: 'Saved to project staging. Will be consolidated later.',
+          });
+          // Trigger consolidation check
+          fetch('/api/memory').then(r => r.json()).then(memStatus => {
+            if (memStatus.needs_consolidation && memStatus.consolidation_candidates?.length > 0) {
+              addToast({
+                type: 'info',
+                message: `Memory consolidation needed: ${memStatus.consolidation_candidates.join(', ')}`,
+                detail: `${memStatus.threshold}+ observations staged. Open the workspace panel to consolidate.`,
+              });
+            }
+          }).catch(() => { /* silent */ });
+        }
       } catch (err) {
         console.error('[cell-edit] Error:', err);
         return {};
@@ -824,13 +856,13 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
         })
       );
 
-      // Send a turn to the agent with the diff
+      // Send a hidden system turn to the agent with the diff
       const blockType = fileWritten ? 'a code block' : 'a prose block';
       const fileNote = fileWritten && originalSegment.type === 'code' && 'filePath' in originalSegment
         ? ` (written to \`${(originalSegment as { filePath?: string }).filePath}\`)`
         : '';
       const saveMessage = `I've edited and saved ${blockType}${fileNote}. Here is what I changed:\n\n\`\`\`diff\n${delta}\`\`\`\n\nPlease continue.`;
-      sendMessage(saveMessage);
+      sendMessage(saveMessage, undefined, { isSystem: true });
 
       return { gdocsPush, fileWritten };
     },
@@ -840,11 +872,11 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
   // Auto-send queued message when streaming completes
   useEffect(() => {
     if (!isStreaming && queuedMessage) {
-      const { content, files } = queuedMessage;
+      const { content, files, opts } = queuedMessage;
       const wasInterrupt = interruptRef.current;
       interruptRef.current = false;
       setQueuedMessage(null);
-      setTimeout(() => sendMessage(content, files), wasInterrupt ? 0 : 100);
+      setTimeout(() => sendMessage(content, files, opts), wasInterrupt ? 0 : 100);
     }
   }, [isStreaming, queuedMessage, sendMessage]);
 
@@ -886,6 +918,8 @@ export function ProjectFeedView({ projectTag, initialTurns = [], isTimeline = fa
         onModeChange={setMode}
         messages={messages}
         contentWidth={contentWidth}
+        thinkingLevel={thinkingLevel}
+        onThinkingLevelChange={(l) => setThinkingLevel(l as 'low' | 'default' | 'high')}
       />
     </div>
   );

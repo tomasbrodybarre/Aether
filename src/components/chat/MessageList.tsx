@@ -85,6 +85,8 @@ export function MessageList({
         style={{ maxWidth: contentWidth >= 100 ? '1000px' : `${contentWidth}%` }}
       >
         {messages.map((message, index) => {
+          // Hide user prompts for system-generated turns (Discuss/Save follow-ups)
+          if (message.role === 'user' && message.is_system) return null;
           // Compute block number for assistant messages (1-indexed, like Jupyter Out[N])
           const blockNumber = message.role === 'assistant'
             ? messages.slice(0, index + 1).filter(m => m.role === 'assistant').length

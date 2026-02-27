@@ -23,11 +23,18 @@ import {
   ToolConfirmationOutcome,
   Scheduler,
   ROOT_SCHEDULER_ID,
+  BaseDeclarativeTool,
+  BaseToolInvocation,
+  Kind,
   type ServerGeminiStreamEvent,
   type ToolCallRequestInfo,
   type CompletedToolCall,
   type ToolCall,
+  type ToolResult,
+  type ToolInvocation,
+  type MessageBus,
 } from '@google/gemini-cli-core';
+import { ThinkingLevel } from '@google/genai';
 import { randomUUID } from 'node:crypto';
 import os from 'os';
 import fs from 'fs';
@@ -68,6 +75,8 @@ export interface GeminiStreamOptions {
   tagInherited?: boolean;
   /** Recent turns for context injection into the preamble */
   recentTurns?: TurnContext[];
+  /** Thinking level: 'low' reduces reasoning for speed, 'high' maximizes reasoning depth */
+  thinkingLevel?: 'low' | 'default' | 'high';
 }
 
 /**
@@ -95,6 +104,12 @@ let initPromise: Promise<void> | null = null;
 
 /** Pre-read file content from aether:init directives — loaded once during init */
 let preReadContent: string = '';
+
+/** Cached stable system context — built once per session, reused across turns.
+ *  Rebuilt only on initGeminiCore() (server restart / re-init). This ensures
+ *  the system instruction prefix stays byte-identical across turns, maximizing
+ *  implicit cache hits on Gemini 2.5+ models. */
+let _cachedStableSystemContext: string | null = null;
 
 /**
  * Map of pending confirmation requests, keyed by correlationId.
@@ -221,6 +236,12 @@ async function _doInit(targetDir: string): Promise<void> {
     // operations are auto-approved to reduce friction.
     // -----------------------------------------------------------------
     _addAutoApproveRules(config);
+
+    // Register custom Aether tools
+    const toolRegistry = config.getToolRegistry();
+    const messageBus = config.getMessageBus();
+    toolRegistry.registerTool(new SetProjectTagTool(messageBus));
+    console.log(`[gemini-core] Registered custom tool: ${SET_PROJECT_TAG_TOOL_NAME}`);
 
     isInitialized = true;
     console.log('[gemini-core] Initialized successfully');
@@ -457,7 +478,72 @@ function _addAutoApproveRules(cfg: InstanceType<typeof Config>): void {
   //    chmod, chown, sudo — permission/privilege escalation
   //    activate_skill — explicit user action
 
+  // ── Custom Aether tools ────────────────────────────────────────────
+  pe.addRule({
+    toolName: SET_PROJECT_TAG_TOOL_NAME,
+    decision: PolicyDecision.ALLOW,
+    priority: PRIORITY,
+    source: `${SOURCE} (project tagging)`,
+  });
+  ruleCount++;
+
   console.log(`[gemini-core] Added ${ruleCount} auto-approve policy rules`);
+}
+
+// ---------------------------------------------------------------------------
+// set_project_tag tool — structured project tagging via tool call
+// ---------------------------------------------------------------------------
+
+const SET_PROJECT_TAG_TOOL_NAME = 'set_project_tag';
+
+class SetProjectTagToolInvocation extends BaseToolInvocation<{ tag: string }, ToolResult> {
+  getDescription(): string {
+    return `Set project tag to "${this.params.tag}"`;
+  }
+
+  async execute(): Promise<ToolResult> {
+    // The actual DB update happens in the tag detection transform,
+    // which intercepts this tool's SSE events and has access to the entity ID.
+    // This execute returns a lightweight acknowledgement to the model.
+    return {
+      llmContent: `Project tag set to "${this.params.tag}".`,
+      returnDisplay: `Project tag: ${this.params.tag}`,
+    };
+  }
+}
+
+class SetProjectTagTool extends BaseDeclarativeTool<{ tag: string }, ToolResult> {
+  constructor(messageBus: MessageBus) {
+    super(
+      SET_PROJECT_TAG_TOOL_NAME,
+      'SetProjectTag',
+      'Set the project tag for this turn. Call this if the current project tag is unset or wrong for the topic.',
+      Kind.Other,
+      {
+        type: 'object',
+        properties: {
+          tag: {
+            type: 'string',
+            description: 'The project name to tag this turn with. Must be from the known projects list.',
+          },
+        },
+        required: ['tag'],
+        additionalProperties: false,
+      },
+      messageBus,
+      false, // isOutputMarkdown
+      false, // canUpdateOutput
+    );
+  }
+
+  createInvocation(
+    params: { tag: string },
+    messageBus: MessageBus,
+    toolName?: string,
+    displayName?: string,
+  ): ToolInvocation<{ tag: string }, ToolResult> {
+    return new SetProjectTagToolInvocation(params, messageBus, toolName, displayName);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -880,7 +966,27 @@ function formatTurnContext(turns: TurnContext[]): string {
   return lines.join('\n');
 }
 
-function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnContext[], tagInherited?: boolean): string {
+/**
+ * Build the STABLE portion of the Aether preamble — content that rarely changes
+ * between turns. This goes into the system instruction for implicit cache hits.
+ *
+ * Returns a session-level snapshot: built once on first call, reused for all
+ * subsequent turns. Only rebuilt after initGeminiCore() (server restart).
+ *
+ * Content is ordered by stability (most stable first, most volatile last)
+ * to maximize prefix cache coverage if the tail changes between sessions:
+ *   1. Aether capabilities & image syntax  (never changes)
+ *   2. Machine environment                 (never changes within session)
+ *   3. Startup behavior instructions       (never changes)
+ *   4. Memory system instructions          (changes only if settings change)
+ *   5. Pre-read file content               (changes between sessions when memory files are edited)
+ */
+function buildStableSystemContext(): string {
+  // Return cached snapshot if available (same session)
+  if (_cachedStableSystemContext !== null) {
+    return _cachedStableSystemContext;
+  }
+
   const hostname = os.hostname();
   const platform = os.platform();
   const release = os.release();
@@ -888,16 +994,11 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
     getSetting('memory_environment_id') ||
     `${hostname}-${platform}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
 
+  // ── Layer 1: Aether capabilities (never changes) ──────────────────────
   const lines: string[] = [
     '# Aether Environment',
     'This session is mediated by Aether, a web-based GUI wrapper around the Gemini CLI Core.',
     'You are NOT running in a raw CLI terminal. The user sees a rich web interface.',
-    '',
-    '## Machine environment',
-    `- Environment ID: ${envId}`,
-    `- Hostname: ${hostname}`,
-    `- OS: ${platform} ${release}`,
-    `- Shell: ${process.env.SHELL || process.env.COMSPEC || 'unknown'}`,
     '',
     '## Aether capabilities (not available in raw CLI):',
     '- **Inline image rendering**: You can embed images in your response text using markdown image syntax (see below). Supported: png, jpg, jpeg, gif, svg, webp, bmp, tiff.',
@@ -916,7 +1017,17 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
     '- Use `dpi=150, bbox_inches="tight"` for clean output',
   ];
 
-  // GEMINI.md startup instructions
+  // ── Layer 2: Machine environment (stable within session) ──────────────
+  lines.push(
+    '',
+    '## Machine environment',
+    `- Environment ID: ${envId}`,
+    `- Hostname: ${hostname}`,
+    `- OS: ${platform} ${release}`,
+    `- Shell: ${process.env.SHELL || process.env.COMSPEC || 'unknown'}`,
+  );
+
+  // ── Layer 3: Startup behavior (never changes) ─────────────────────────
   lines.push(
     '',
     '## Startup behavior',
@@ -924,7 +1035,6 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
     'execute them silently without narration, then address the user\'s request directly.',
   );
 
-  // Pre-read content from aether:init directives
   if (preReadContent) {
     lines.push(
       '',
@@ -934,7 +1044,7 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
     );
   }
 
-  // Memory system instructions
+  // ── Layer 4: Memory system instructions (changes if settings change) ──
   const memoryEnabled = getSetting('memory_enabled') !== 'false';
   const memoryRepoPath = getSetting('memory_repo_path') || '';
 
@@ -945,6 +1055,7 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
     if (getSetting('memory_trigger_error_recovery') !== 'false') enabledTriggers.push('error_recovery');
     if (getSetting('memory_trigger_project_status') !== 'false') enabledTriggers.push('project_status');
     if (getSetting('memory_trigger_project_shift') !== 'false') enabledTriggers.push('project_shift');
+    if (getSetting('memory_trigger_cell_edits') !== 'false') enabledTriggers.push('cell_edits');
 
     const customRules = getSetting('memory_custom_rules') || '';
     const normPath = memoryRepoPath.replace(/\\/g, '/');
@@ -958,6 +1069,7 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
     if (enabledTriggers.includes('error_recovery')) triggerDescriptions.push('Tool call fails, retry succeeds with modified approach → record the fix');
     if (enabledTriggers.includes('project_status')) triggerDescriptions.push('Project status changes (task completed, phase transition) → record the update');
     if (enabledTriggers.includes('project_shift')) triggerDescriptions.push('Conversation shifts between projects → scan completed turns for lessons before moving on');
+    if (enabledTriggers.includes('cell_edits')) triggerDescriptions.push('Cell edits (Discuss/Save) → handled automatically by Aether (do NOT duplicate — see below)');
 
     lines.push(
       '',
@@ -1002,6 +1114,16 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
       );
     }
 
+    lines.push(
+      '',
+      '### Automatic cell-edit memory analysis',
+      'When the user edits a cell (code or prose) and clicks Save, Aether automatically analyzes the full edit chain',
+      '(all Discuss + Save diffs and linked conversation turns) to detect learnable patterns. If a pattern is found,',
+      'it is written to the project\'s Staging section automatically. **Do NOT duplicate this analysis** — if a user',
+      'edits a cell and saves, you do not need to record a memory observation about the edit. Focus your memory',
+      'triggers on conversational patterns (explicit rules, corrections, etc.) that happen outside the cell-edit flow.',
+    );
+
     if (customRules) {
       lines.push(
         '',
@@ -1010,6 +1132,24 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
       );
     }
   }
+
+  // ── Layer 5: Pre-read file content (most volatile — changes between sessions) ──
+  if (preReadContent) {
+    lines.push('', preReadContent);
+  }
+
+  _cachedStableSystemContext = lines.join('\n');
+  return _cachedStableSystemContext;
+}
+
+/**
+ * Build the DYNAMIC portion of the Aether preamble — content that changes
+ * every turn. This stays in the user message (not cacheable).
+ *
+ * Includes: project tagging context, recent conversation turns, recent user edits.
+ */
+function buildDynamicTurnContext(currentProjectTag?: string, recentTurns?: TurnContext[], tagInherited?: boolean): string {
+  const lines: string[] = [];
 
   // Per-turn project tagging (independent of memory system)
   const knownProjects = _extractKnownProjectNames(preReadContent);
@@ -1024,16 +1164,14 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
     : 'Current project tag: none.';
 
   lines.push(
-    '',
     '## Per-turn project tagging (IMPORTANT)',
     tagStatus,
     `Known projects: ${projectListStr}.`,
     'RULES:',
-    '1. If no tag is set, you MUST emit `<!-- project: TagName -->` at the very start of your response (before any other text).',
-    '2. If the current tag is wrong for this turn\'s topic, emit the marker with the correct project name.',
-    '3. If the current tag is correct, do NOT emit any marker.',
-    '4. The marker is invisible in rendered markdown and will be stripped from the saved response.',
-    '5. ONLY use project names from the known projects list above. Do NOT invent new names or use working directory basenames.',
+    '1. If no tag is set, you MUST call the `set_project_tag` tool with the correct project name as your FIRST action.',
+    '2. If the current tag is wrong for this turn\'s topic, call `set_project_tag` with the correct name.',
+    '3. If the current tag is correct, do NOT call the tool.',
+    '4. ONLY use project names from the known projects list above. Do NOT invent new names or use working directory basenames.',
   );
 
   // Recent conversation context
@@ -1056,12 +1194,17 @@ function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnConte
     // Non-critical — skip if DB not ready
   }
 
-  // Append pre-read content at the end of the preamble
-  if (preReadContent) {
-    lines.push('', preReadContent);
-  }
-
   return lines.join('\n');
+}
+
+/**
+ * Legacy wrapper — combines stable + dynamic preamble for backwards compatibility.
+ * Will be removed once streamGemini() uses the split functions directly.
+ */
+function buildAetherPreamble(currentProjectTag?: string, recentTurns?: TurnContext[], tagInherited?: boolean): string {
+  const stable = buildStableSystemContext();
+  const dynamic = buildDynamicTurnContext(currentProjectTag, recentTurns, tagInherited);
+  return [stable, dynamic].filter(Boolean).join('\n\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -1186,6 +1329,7 @@ function mapEventToSSE(event: ServerGeminiStreamEvent): SSEEvent | null {
           candidatesTokenCount?: number;
           totalTokenCount?: number;
           thoughtsTokenCount?: number;
+          cachedContentTokenCount?: number;
         };
       } }).value;
 
@@ -1193,8 +1337,7 @@ function mapEventToSSE(event: ServerGeminiStreamEvent): SSEEvent | null {
         ? {
             input_tokens: fin.usageMetadata.promptTokenCount || 0,
             output_tokens: fin.usageMetadata.candidatesTokenCount || 0,
-            // Gemini doesn't have cache tokens — zero them out
-            cache_read_input_tokens: 0,
+            cache_read_input_tokens: fin.usageMetadata.cachedContentTokenCount || 0,
             cache_creation_input_tokens: 0,
           }
         : null;
@@ -1371,15 +1514,14 @@ function checkMemoryWrite(
 // Project tag detection transform
 // ---------------------------------------------------------------------------
 
-const TAG_MARKER_RE = /<!--\s*project:\s*(.+?)\s*-->/;
-const TAG_SCAN_LIMIT = 300; // chars of text content to scan before giving up
-
 /**
- * TransformStream that scans the first ~300 chars of text events for a
- * `<!-- project: TagName -->` marker. When found:
- *   1. Strips the marker from the text
- *   2. Emits a `project_tag` SSE event
- *   3. Updates the DB with the inferred tag
+ * TransformStream that watches for `set_project_tag` tool call events in the
+ * SSE stream. When found:
+ *   1. Emits a `project_tag` SSE event
+ *   2. Updates the DB with the inferred tag
+ *
+ * No text buffering or scanning needed — the model calls the tool, and we
+ * intercept the structured event. All chunks pass through immediately.
  *
  * When `enabled` is false, acts as a passthrough.
  */
@@ -1389,142 +1531,53 @@ export function createTagDetectionTransform(
   entityType: 'session' | 'turn' = 'session',
 ): TransformStream<string, string> {
   if (!enabled) {
-    console.log(`[tag-detect] DISABLED for ${entityType} ${entityId.slice(0, 8)}… (source=manual)`);
     return new TransformStream(); // passthrough
   }
 
-  console.log(`[tag-detect] ENABLED for ${entityType} ${entityId.slice(0, 8)}… — scanning first ${TAG_SCAN_LIMIT} chars`);
-
-  let textSoFar = '';
-  let scanning = true;
-  let bufferedChunks: string[] = [];
+  let tagDetected = false;
 
   return new TransformStream<string, string>({
     transform(chunk, controller) {
-      if (!scanning) {
-        controller.enqueue(chunk);
-        return;
-      }
+      // Always pass through immediately — no buffering
+      controller.enqueue(chunk);
 
-      // Parse SSE lines from chunk to accumulate text content
+      if (tagDetected) return;
+
+      // Scan SSE events for set_project_tag tool call
       const lines = chunk.split('\n');
-      let hasToolUse = false;
-
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const event: { type: string; data: string } = JSON.parse(line.slice(6));
-            if (event.type === 'text') {
-              textSoFar += event.data;
-            } else if (event.type === 'tool_use' || event.type === 'error' || event.type === 'done') {
-              hasToolUse = true; // flush immediately on tool_use, error, or done
-            }
-          } catch {
-            // skip malformed
-          }
-        }
-      }
-
-      bufferedChunks.push(chunk);
-
-      // Check for marker in accumulated text
-      const match = TAG_MARKER_RE.exec(textSoFar);
-      if (match) {
-        const detectedTag = match[1].trim();
-        scanning = false;
-        console.log(`[tag-detect] FOUND marker for ${entityType} ${entityId.slice(0, 8)}… → "${detectedTag}" (at char ${match.index})`);
-
-        // Update DB — route to correct table based on entity type
+        if (!line.startsWith('data: ')) continue;
         try {
-          if (entityType === 'turn') {
-            updateTurnProjectTag(entityId, detectedTag, 'inferred');
-          } else {
-            updateSessionProjectTag(entityId, detectedTag, 'inferred');
+          const event: { type: string; data: string } = JSON.parse(line.slice(6));
+          if (event.type === 'tool_use') {
+            const toolData = JSON.parse(event.data);
+            if (toolData.name === SET_PROJECT_TAG_TOOL_NAME && toolData.input?.tag) {
+              tagDetected = true;
+              const tag = String(toolData.input.tag).trim();
+
+              console.log(`[tag-detect] set_project_tag tool call for ${entityType} ${entityId.slice(0, 8)}… → "${tag}"`);
+
+              // Update DB
+              try {
+                if (entityType === 'turn') {
+                  updateTurnProjectTag(entityId, tag, 'inferred');
+                } else {
+                  updateSessionProjectTag(entityId, tag, 'inferred');
+                }
+              } catch { /* best effort */ }
+
+              // Emit project_tag SSE event for the frontend
+              controller.enqueue(formatSSE({
+                type: 'project_tag' as SSEEvent['type'],
+                data: JSON.stringify({ tag }),
+              }));
+              return;
+            }
           }
-        } catch {
-          // best effort
-        }
-
-        // Rebuild buffered chunks with the marker stripped from text events
-        const markerStr = match[0];
-        let stripped = false;
-        for (const buffered of bufferedChunks) {
-          if (!stripped) {
-            // Strip the marker from text events in this chunk
-            const rewritten = _stripMarkerFromChunk(buffered, markerStr);
-            // Prepend the project_tag SSE event
-            const tagEvent = formatSSE({
-              type: 'project_tag' as SSEEvent['type'],
-              data: JSON.stringify({ tag: detectedTag }),
-            });
-            controller.enqueue(tagEvent + rewritten);
-            stripped = true;
-          } else {
-            controller.enqueue(buffered);
-          }
-        }
-        bufferedChunks = [];
-        return;
+        } catch { /* skip malformed */ }
       }
-
-      // No marker yet — flush if we've scanned enough text or hit a tool_use
-      if (textSoFar.length >= TAG_SCAN_LIMIT || hasToolUse) {
-        scanning = false;
-        const reason = hasToolUse ? 'tool_use event' : `text limit (${textSoFar.length} chars)`;
-        console.log(`[tag-detect] NO marker for ${entityType} ${entityId.slice(0, 8)}… — gave up after ${reason}. First 120 chars: "${textSoFar.slice(0, 120).replace(/\n/g, '\\n')}"`);
-        for (const buffered of bufferedChunks) {
-          controller.enqueue(buffered);
-        }
-        bufferedChunks = [];
-        return;
-      }
-
-      // Continue buffering
-    },
-
-    flush(controller) {
-      // Flush any remaining buffered chunks
-      if (scanning && bufferedChunks.length > 0) {
-        console.log(`[tag-detect] Stream ended while still scanning for ${entityType} ${entityId.slice(0, 8)}… (${textSoFar.length} chars scanned). First 120 chars: "${textSoFar.slice(0, 120).replace(/\n/g, '\\n')}"`);
-      }
-      for (const buffered of bufferedChunks) {
-        controller.enqueue(buffered);
-      }
-      bufferedChunks = [];
     },
   });
-}
-
-/**
- * Strip a marker string from text events within an SSE chunk.
- * Rewrites `data: {"type":"text","data":"...marker..."}` lines.
- */
-function _stripMarkerFromChunk(chunk: string, marker: string): string {
-  const lines = chunk.split('\n');
-  const result: string[] = [];
-  let markerRemoved = false;
-
-  for (const line of lines) {
-    if (!markerRemoved && line.startsWith('data: ')) {
-      try {
-        const event: { type: string; data: string } = JSON.parse(line.slice(6));
-        if (event.type === 'text' && event.data.includes(marker)) {
-          const cleaned = event.data.replace(marker, '');
-          if (cleaned) {
-            result.push(`data: ${JSON.stringify({ type: 'text', data: cleaned })}`);
-          }
-          // else: entire text event was just the marker — skip the line
-          markerRemoved = true;
-          continue;
-        }
-      } catch {
-        // not parseable, pass through
-      }
-    }
-    result.push(line);
-  }
-
-  return result.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -1570,6 +1623,38 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
           config.setModel(model, false);
         }
 
+        // Apply thinking level override via runtime alias.
+        // When user selects Low or High, we register a runtime alias that extends
+        // the model family's chat-base alias with the appropriate thinkingConfig.
+        // We can't extend the model name directly because the API may return
+        // model names (e.g. gemini-3.1-pro-preview) that aren't registered aliases.
+        // When 'default', we use the model's built-in thinking config as-is.
+        const effectiveThinkingLevel = options.thinkingLevel || 'default';
+        if (effectiveThinkingLevel !== 'default') {
+          const baseModel = model || getSetting('default_model') || 'gemini-3-pro';
+          const thinkingLevelValue = effectiveThinkingLevel === 'low'
+            ? ThinkingLevel.LOW
+            : ThinkingLevel.HIGH;
+          // Pick the right chat-base alias for the model family
+          const chatBase = baseModel.startsWith('gemini-3')
+            ? 'chat-base-3'
+            : baseModel.startsWith('gemini-2.5')
+              ? 'chat-base-2.5'
+              : 'chat-base';
+          config.modelConfigService.registerRuntimeModelConfig('aether-thinking', {
+            extends: chatBase,
+            modelConfig: {
+              model: baseModel,
+              generateContentConfig: {
+                thinkingConfig: {
+                  thinkingLevel: thinkingLevelValue,
+                },
+              },
+            },
+          });
+          config.setModel('aether-thinking', false);
+        }
+
         // Build the prompt text, incorporating file attachments
         let finalPromptText = prompt;
 
@@ -1600,17 +1685,28 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
           }
         }
 
-        // Build the Aether preamble and inject it into the prompt.
-        // Gemini Core loads GEMINI.md natively, but we prepend our
-        // Aether-specific instructions as a system context block.
-        const preamble = buildAetherPreamble(options.projectTag, options.recentTurns, options.tagInherited);
-        const contextParts = [preamble, systemPrompt].filter(Boolean);
+        // ── Preamble: stable → system instruction, dynamic → user message ──
+        // Stable content (capabilities, memory instructions, pre-read files)
+        // goes into the system instruction for implicit cache hits on Gemini 2.5+.
+        // Dynamic content (tag, recent turns, recent edits) stays in the user message.
+        const stableContext = buildStableSystemContext();
+        const dynamicContext = buildDynamicTurnContext(options.projectTag, options.recentTurns, options.tagInherited);
 
-        // If there's context to inject, prepend it to the prompt
-        // wrapped in a system-context block.
-        if (contextParts.length > 0) {
-          const contextBlock = contextParts.join('\n\n');
-          finalPromptText = `<system-context>\n${contextBlock}\n</system-context>\n\n${finalPromptText}`;
+        // Get Core's rendered system instruction (from GEMINI.md files)
+        const coreMemory = config.getUserMemory();
+        const coreSystemInstruction = typeof coreMemory === 'string'
+          ? coreMemory
+          : [coreMemory.global, coreMemory.extension, coreMemory.project].filter(Boolean).join('\n\n');
+
+        // Combined system instruction: Core's GEMINI.md + Aether stable context
+        const combinedSystemInstruction = [coreSystemInstruction, stableContext]
+          .filter(Boolean).join('\n\n');
+
+        // Inject dynamic-only context into the user message
+        const dynamicParts = [dynamicContext, systemPrompt].filter(Boolean);
+        if (dynamicParts.length > 0) {
+          const dynamicBlock = dynamicParts.join('\n\n');
+          finalPromptText = `<turn-context>\n${dynamicBlock}\n</turn-context>\n\n${finalPromptText}`;
         }
 
         // Emit initial status
@@ -1670,6 +1766,12 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
           schedulerId: ROOT_SCHEDULER_ID,
         });
 
+        // Set system instruction on the chat object (stable Aether context
+        // + Core's GEMINI.md). This enables implicit caching on Gemini 2.5+
+        // since the system instruction prefix stays identical across turns.
+        const chat = client.getChat();
+        chat.setSystemInstruction(combinedSystemInstruction);
+
         // ---------------------------------------------------------------
         // Agent loop: stream → collect tool requests → execute → continue
         // ---------------------------------------------------------------
@@ -1681,6 +1783,11 @@ export function streamGemini(options: GeminiStreamOptions): ReadableStream<strin
         while (turnCount < MAX_AGENT_TURNS) {
           turnCount++;
           if (signal.aborted) break;
+
+          // Re-set system instruction before each model turn to guard
+          // against Core's updateSystemInstruction() overwriting it
+          // between agent loop iterations (e.g. after tool execution).
+          chat.setSystemInstruction(combinedSystemInstruction);
 
           // Stream a single model turn
           console.log(`[gemini-core] Starting sendMessageStream for turn ${turnCount}...`);
@@ -1929,5 +2036,6 @@ export function disposeGeminiCore(): void {
     isInitialized = false;
     initPromise = null;
     preReadContent = '';
+    _cachedStableSystemContext = null;
   }
 }

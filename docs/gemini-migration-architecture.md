@@ -321,6 +321,15 @@ The memory system is model-agnostic by design — it's a behavioral layer (trigg
 Current: Aether reads `~/.claude/settings.json` for MCP server configs and passes to SDK.
 New: Gemini CLI reads `.mcp.json` natively. Aether's Settings > Extensions page adapts to write `.mcp.json` format instead.
 
+### 7. Native Reasoning UI (`thought` events)
+**Enhancement**: Gemini 2.0+ supports a `thinking_level` parameter that streams `thought` events distinct from `content`.
+- **Frontend**: Add a "Thinking: Low/Medium/High" toggle to the chat input or settings.
+- **Rendering**: Map `thought` SSE events to a native collapsible `<details>` block (e.g., "🧠 Agent Reasoning") that streams in real-time. This eliminates the need for regex-parsing markdown `<thinking>` blocks.
+
+### 8. Enforcing Reliability with Structured Outputs (Tools)
+**Enhancement**: Replace all prompt-engineered JSON outputs with rigid Tool schemas.
+- **System Tasks**: For background tasks like memory consolidation, instead of prompting the model to output a JSON block (which risks markdown formatting errors), define a `consolidate_memory` tool schema. Use Gemini's `toolConfig` to force the model to *only* respond using that tool. This guarantees 100% reliable schema adherence.
+
 ## Migration plan
 
 ### Phase 0: Verify Core package API ✅ COMPLETE

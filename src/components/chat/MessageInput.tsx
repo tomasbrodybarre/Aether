@@ -69,6 +69,8 @@ interface MessageInputProps {
   onModeChange?: (mode: string) => void;
   messages?: Array<{ role: string; content: string }>;
   contentWidth?: number;
+  thinkingLevel?: string;
+  onThinkingLevelChange?: (level: string) => void;
 }
 
 interface PopoverItem {
@@ -317,6 +319,8 @@ export function MessageInput({
   onModeChange,
   messages: sessionMessages,
   contentWidth = 100,
+  thinkingLevel = 'default',
+  onThinkingLevelChange,
 }: MessageInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -724,8 +728,8 @@ export function MessageInput({
         return;
       }
 
-      // Prompt history navigation (only when popover is closed and input is empty)
-      if (e.key === 'ArrowUp' && !popoverMode && promptHistory.length > 0 && inputValue.trim() === '') {
+      // Prompt history navigation (only when popover is closed and input is empty OR already browsing)
+      if (e.key === 'ArrowUp' && !popoverMode && promptHistory.length > 0 && (inputValue.trim() === '' || historyIndex !== -1)) {
         e.preventDefault();
         historyNavigatingRef.current = true;
         if (historyIndex === -1) {
@@ -1109,6 +1113,31 @@ export function MessageInput({
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* Thinking level toggle */}
+                <div className="flex items-center rounded-md border bg-muted/30 p-0.5">
+                  {(['low', 'default', 'high'] as const).map((level) => {
+                    const isActive = thinkingLevel === level;
+                    const label = level === 'low' ? 'Lo' : level === 'default' ? 'Med' : 'Hi';
+                    const tooltip = level === 'low' ? 'Low thinking — faster' : level === 'default' ? 'Standard thinking' : 'Deep thinking — slower';
+                    return (
+                      <button
+                        key={level}
+                        type="button"
+                        title={tooltip}
+                        className={cn(
+                          "px-1.5 py-0.5 text-[0.625rem] font-medium rounded transition-colors",
+                          isActive
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                        onClick={() => onThinkingLevelChange?.(level)}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <FileAwareSubmitButton

@@ -299,6 +299,12 @@ function migrateDb(db: Database.Database): void {
   if (!turnColNames.includes('project_tag_source')) {
     db.exec("ALTER TABLE turns ADD COLUMN project_tag_source TEXT");
   }
+  if (!turnColNames.includes('is_system')) {
+    db.exec("ALTER TABLE turns ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0");
+  }
+  if (!turnColNames.includes('usage_cached')) {
+    db.exec("ALTER TABLE turns ADD COLUMN usage_cached INTEGER");
+  }
 
   // Ensure turn activity tables exist for databases created before this migration
   db.exec(`
@@ -339,6 +345,13 @@ function migrateDb(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_cell_edits_turn ON cell_edits(turn_id, cell_index, version);
   `);
+
+  // Migrate cell_edits table — add discuss_turn_id for linking discuss edits to conversation turns
+  const ceCols = db.prepare("PRAGMA table_info(cell_edits)").all() as { name: string }[];
+  const ceColNames = ceCols.map(c => c.name);
+  if (!ceColNames.includes('discuss_turn_id')) {
+    db.exec("ALTER TABLE cell_edits ADD COLUMN discuss_turn_id TEXT");
+  }
 
   // Ensure project_doc_mappings table exists
   db.exec(`
@@ -512,9 +525,11 @@ export interface Turn {
   mode: string;
   usage_input: number | null;
   usage_output: number | null;
+  usage_cached: number | null;
   tool_calls: number;
   created_at: string;
   duration_ms: number | null;
+  is_system: number;
 }
 
 export function createTurn(
@@ -523,6 +538,7 @@ export function createTurn(
   model?: string | null,
   workingDirectory?: string | null,
   mode?: string | null,
+  isSystem?: boolean,
 ): Turn {
   const db = getDb();
   const id = crypto.randomBytes(16).toString('hex');
@@ -530,8 +546,8 @@ export function createTurn(
   const title = prompt.slice(0, 80) + (prompt.length > 80 ? '...' : '');
 
   db.prepare(
-    'INSERT INTO turns (id, project_tag, title, prompt, model, working_directory, mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, projectTag || null, title, prompt, model || null, workingDirectory || null, mode || 'code', now);
+    'INSERT INTO turns (id, project_tag, title, prompt, model, working_directory, mode, is_system, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, projectTag || null, title, prompt, model || null, workingDirectory || null, mode || 'code', isSystem ? 1 : 0, now);
 
   return db.prepare('SELECT * FROM turns WHERE id = ?').get(id) as Turn;
 }
@@ -543,16 +559,18 @@ export function updateTurnResponse(
   usageOutput?: number | null,
   toolCalls?: number,
   durationMs?: number | null,
+  usageCached?: number | null,
 ): void {
   const db = getDb();
   db.prepare(
-    'UPDATE turns SET response = ?, usage_input = ?, usage_output = ?, tool_calls = ?, duration_ms = ? WHERE id = ?'
+    'UPDATE turns SET response = ?, usage_input = ?, usage_output = ?, tool_calls = ?, duration_ms = ?, usage_cached = ? WHERE id = ?'
   ).run(
     response,
     usageInput ?? null,
     usageOutput ?? null,
     toolCalls ?? 0,
     durationMs ?? null,
+    usageCached ?? null,
     id,
   );
 }
@@ -822,6 +840,12 @@ export function getRecentSaveCellEdits(limit: number = 10, projectTag?: string |
     WHERE ce.action = 'save'
     ORDER BY ce.created_at DESC LIMIT ?
   `).all(limit) as CellEdit[];
+}
+
+/** Link a discuss-type cell edit to its conversation turn */
+export function updateCellEditDiscussTurnId(cellEditId: string, discussTurnId: string): void {
+  const db = getDb();
+  db.prepare('UPDATE cell_edits SET discuss_turn_id = ? WHERE id = ?').run(discussTurnId, cellEditId);
 }
 
 // ==========================================

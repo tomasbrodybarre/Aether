@@ -76,6 +76,7 @@ export interface Message {
   token_usage: string | null; // JSON string of TokenUsage
   project_tag?: string | null; // Project tag for memory system routing
   model?: string | null; // Model that generated this response
+  is_system?: boolean; // True if this is an auto-generated system turn (hidden user prompt in UI)
 }
 
 // Structured message content blocks (stored as JSON in messages.content)
@@ -469,6 +470,7 @@ export interface CellEdit {
   version: number;
   delta: string; // unified diff from previous version
   action: 'discuss' | 'save';
+  discuss_turn_id: string | null; // links discuss edits to their conversation turn
   created_at: string;
 }
 
@@ -514,14 +516,17 @@ export interface TurnRecord {
   mode: string;
   usage_input: number | null;
   usage_output: number | null;
+  usage_cached: number | null;
   tool_calls: number;
   created_at: string;
   duration_ms: number | null;
+  is_system: number;
 }
 
 /** Convert a TurnRecord to a pair of Message objects for rendering in MessageList */
 export function turnToMessages(turn: TurnRecord): Message[] {
   const msgs: Message[] = [];
+  const isSystem = !!turn.is_system;
 
   msgs.push({
     id: `${turn.id}-user`,
@@ -531,6 +536,7 @@ export function turnToMessages(turn: TurnRecord): Message[] {
     created_at: turn.created_at,
     token_usage: null,
     project_tag: turn.project_tag,
+    is_system: isSystem,
   });
 
   if (turn.response) {
@@ -541,10 +547,11 @@ export function turnToMessages(turn: TurnRecord): Message[] {
       content: turn.response,
       created_at: turn.created_at,
       token_usage: (turn.usage_input || turn.usage_output)
-        ? JSON.stringify({ input_tokens: turn.usage_input || 0, output_tokens: turn.usage_output || 0 })
+        ? JSON.stringify({ input_tokens: turn.usage_input || 0, output_tokens: turn.usage_output || 0, cache_read_input_tokens: turn.usage_cached || 0 })
         : null,
       project_tag: turn.project_tag,
       model: turn.model,
+      is_system: isSystem,
     });
   }
 

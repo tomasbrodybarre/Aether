@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { streamGemini, createTagDetectionTransform } from '@/lib/gemini-core';
-import { addMessage, getSession, updateSessionTitle, getSetting, createTurn, updateTurnResponse, getRecentTurnContext, insertToolCall, updateToolCallResult, insertThought } from '@/lib/db';
+import { addMessage, getSession, updateSessionTitle, getSetting, createTurn, updateTurnResponse, getRecentTurnContext, insertToolCall, updateToolCallResult, insertThought, updateCellEditDiscussTurnId } from '@/lib/db';
 import type { SendMessageRequest, SSEEvent, TokenUsage, MessageContentBlock, FileAttachment } from '@/types';
 import fs from 'fs';
 import path from 'path';
@@ -16,6 +16,9 @@ export async function POST(request: NextRequest) {
       // Turn-based flow fields
       project_tag?: string | null;
       working_directory?: string;
+      is_system?: boolean;
+      cell_edit_id?: string;
+      thinking_level?: 'low' | 'default' | 'high';
     };
     const { session_id, content, model, mode, files } = body;
 
@@ -53,9 +56,12 @@ async function handleTurnFlow(
     files?: FileAttachment[];
     project_tag?: string | null;
     working_directory?: string;
+    is_system?: boolean;
+    cell_edit_id?: string;
+    thinking_level?: 'low' | 'default' | 'high';
   },
 ) {
-  const { content, model, mode, files, project_tag, working_directory } = body;
+  const { content, model, mode, files, project_tag, working_directory, is_system, cell_edit_id, thinking_level } = body;
 
   const effectiveMode = mode || 'code';
   const effectiveModel = model || getSetting('default_model') || 'gemini-3-pro';
@@ -77,7 +83,12 @@ async function handleTurnFlow(
   }
 
   // Create the turn record with the effective model (so the UI can display it)
-  const turn = createTurn(content, effectiveTag, effectiveModel, workDir, effectiveMode);
+  const turn = createTurn(content, effectiveTag, effectiveModel, workDir, effectiveMode, is_system);
+
+  // Link this turn to a discuss-type cell edit if provided
+  if (cell_edit_id) {
+    updateCellEditDiscussTurnId(cell_edit_id, turn.id);
+  }
 
   // Handle file uploads
   let fileAttachments: FileAttachment[] | undefined;
@@ -137,6 +148,7 @@ async function handleTurnFlow(
     projectTag: turn.project_tag || undefined,
     tagInherited,
     recentTurns,
+    thinkingLevel: thinking_level,
   });
 
   // Pipe through tag detection (routes to updateTurnProjectTag)
@@ -153,7 +165,7 @@ async function handleTurnFlow(
   // Prepend a turn_created event so the frontend knows the turn ID
   const turnCreatedEvent = `data: ${JSON.stringify({
     type: 'turn_created',
-    data: JSON.stringify({ turn_id: turn.id, project_tag: turn.project_tag }),
+    data: JSON.stringify({ turn_id: turn.id, project_tag: turn.project_tag, is_system: turn.is_system }),
   })}\n\n`;
 
   const prependStream = new ReadableStream<string>({
@@ -336,6 +348,7 @@ async function collectTurnResponse(stream: ReadableStream<string>, turnId: strin
         tokenUsage?.output_tokens ?? null,
         toolCallCount,
         null, // duration_ms — computed client-side if needed
+        tokenUsage?.cache_read_input_tokens ?? null,
       );
     }
   }
